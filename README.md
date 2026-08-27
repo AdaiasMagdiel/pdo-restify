@@ -1,5 +1,7 @@
 # pdo-restify
 
+[![Tests](https://github.com/adaiasmagdiel/pdo-restify/actions/workflows/tests.yml/badge.svg)](https://github.com/adaiasmagdiel/pdo-restify/actions/workflows/tests.yml)
+
 A small, framework-agnostic REST API layer on top of PDO. It exposes whitelisted
 database tables as CRUD endpoints — inspired by [PostgREST](https://postgrest.org/)
 — but works with plain PDO, so it runs on MySQL, MariaDB and SQLite, and can be
