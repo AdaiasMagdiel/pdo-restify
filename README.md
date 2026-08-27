@@ -139,8 +139,7 @@ composer test
 
 MySQL and MariaDB compatibility is checked separately, against real service
 containers, by the [Integration workflow](.github/workflows/integration.yml)
-on GitHub Actions — those tests skip themselves locally (no server to spin
-up) and only run in CI.
+on GitHub Actions. Those tests skip themselves locally and only run in CI.
 
 ## Roadmap
 

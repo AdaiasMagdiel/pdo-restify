@@ -14,8 +14,10 @@ jobs:
         include:
           - driver: mysql
             image: mysql:8.4
+            health_cmd: mysqladmin ping -h 127.0.0.1 -uroot -proot
           - driver: mariadb
             image: mariadb:11
+            health_cmd: mariadb-admin ping -h 127.0.0.1 -uroot -proot
 
     services:
       database:
@@ -26,7 +28,7 @@ jobs:
         ports:
           - 3306:3306
         options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-cmd="${{ matrix.health_cmd }}"
           --health-interval=5s
           --health-timeout=5s
           --health-retries=10
