@@ -24,6 +24,12 @@ it('builds an in clause with one placeholder per value', function () {
     expect($params)->toBe([':f0_0' => '1', ':f0_1' => '2', ':f0_2' => '3']);
 });
 
+it('omits the LIMIT/OFFSET clause when limit is null', function () {
+    [$sql] = QueryBuilder::select('posts', ['id'], [], [], null, null, 0);
+
+    expect($sql)->toBe('SELECT id FROM posts');
+});
+
 it('builds an insert query', function () {
     [$sql, $params] = QueryBuilder::insert('posts', ['title' => 'Hello', 'user_id' => 1]);
 

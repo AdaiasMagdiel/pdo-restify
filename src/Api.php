@@ -81,7 +81,7 @@ final class Api
         try {
             return match ($request->method) {
                 'GET' => $id !== null
-                    ? $this->find($resource, $id, $context)
+                    ? $this->find($resource, $id, $context, $request->query)
                     : $this->list($resource, $request->query, $context),
                 'POST' => $this->insert($resource, $request->body, $context),
                 'PATCH', 'PUT' => $id !== null
@@ -102,41 +102,60 @@ final class Api
      *
      * @param array<string, mixed> $query
      * @param array<string, mixed> $context
-     * @throws Exceptions\ForbiddenException if `select` has no policy registered.
-     * @throws Exceptions\ValidationException on an unknown/malformed filter, select or order column.
+     * @throws Exceptions\ForbiddenException if `select`, or a requested relation's `select`, has no policy registered.
+     * @throws Exceptions\ValidationException on an unknown/malformed filter, select, order or relation column.
      */
     private function list(Resource $resource, array $query, array $context): Response
     {
         $conditions = ($resource->policyFor(Operation::Select))($context);
         $allowed = $resource->allowedColumns();
 
-        $columns = Filters::select($query['select'] ?? null, $allowed);
+        [$columns, $embeds] = Filters::select($query['select'] ?? null, $allowed, $resource->relationNames());
         $filters = Filters::parse($query, $allowed);
         $order = Filters::order($query['order'] ?? null, $allowed);
         $limit = min((int) ($query['limit'] ?? self::DEFAULT_LIMIT), $this->maxLimit);
         $offset = max((int) ($query['offset'] ?? 0), 0);
 
-        [$sql, $params] = QueryBuilder::select($resource->table, $columns, $filters, $conditions, $order, $limit, $offset);
+        $extraColumns = array_values(array_diff($this->localJoinColumns($resource, $embeds), $columns));
+
+        [$sql, $params] = QueryBuilder::select(
+            $resource->table,
+            array_merge($columns, $extraColumns),
+            $filters,
+            $conditions,
+            $order,
+            $limit,
+            $offset,
+        );
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
 
-        return Response::json($stmt->fetchAll());
+        $rows = $this->embedRelations($resource, $stmt->fetchAll(), $embeds, $context);
+
+        return Response::json($this->stripColumns($rows, $extraColumns));
     }
 
     /**
-     * Handles `GET /{table}/{id}`.
+     * Handles `GET /{table}/{id}`. $query is only consulted for `select=`
+     * (including relation embeds) — callers that just want the full row back
+     * (insert/update echoing the written row) pass none.
      *
      * @param array<string, mixed> $context
-     * @throws Exceptions\ForbiddenException if `select` has no policy registered.
+     * @param array<string, mixed> $query
+     * @throws Exceptions\ForbiddenException if `select`, or a requested relation's `select`, has no policy registered.
+     * @throws Exceptions\ValidationException on an unknown select or relation column.
      * @throws Exceptions\NotFoundException if no row matches the id and policy conditions.
      */
-    private function find(Resource $resource, string $id, array $context): Response
+    private function find(Resource $resource, string $id, array $context, array $query = []): Response
     {
         $conditions = ($resource->policyFor(Operation::Select))($context);
         $conditions[$resource->primaryKey] = $id;
 
-        [$sql, $params] = QueryBuilder::select($resource->table, $resource->allowedColumns(), [], $conditions, null, 1, 0);
+        [$columns, $embeds] = Filters::select($query['select'] ?? null, $resource->allowedColumns(), $resource->relationNames());
+        $extraColumns = array_values(array_diff($this->localJoinColumns($resource, $embeds), $columns));
+
+        [$sql, $params] = QueryBuilder::select($resource->table, array_merge($columns, $extraColumns), [], $conditions, null, 1, 0);
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
@@ -146,7 +165,10 @@ final class Api
             throw new NotFoundException("Resource '{$resource->table}' with id '{$id}' not found");
         }
 
-        return Response::json($row);
+        $rows = $this->embedRelations($resource, [$row], $embeds, $context);
+        $rows = $this->stripColumns($rows, $extraColumns);
+
+        return Response::json($rows[0]);
     }
 
     /**
@@ -381,6 +403,153 @@ final class Api
         $this->pdo->commit();
 
         return Response::json(null, 204);
+    }
+
+    /**
+     * The parent-row columns needed to match against each requested embed —
+     * the resource's own primary key for a hasMany (grouped by the related
+     * table's foreign key), or the resource's own foreign key column for a
+     * belongsTo (matched against the related table's primary key). Forced
+     * into the query even when the caller's select= didn't ask for them;
+     * {@see self::stripColumns()} removes them again afterward if so.
+     *
+     * @param array<string, string[]> $embeds
+     * @return string[]
+     */
+    private function localJoinColumns(Resource $resource, array $embeds): array
+    {
+        $columns = [];
+
+        foreach (array_keys($embeds) as $name) {
+            $relation = $resource->relation($name);
+
+            if ($relation === null) {
+                continue; // Filters::select() already rejects unknown relations before this runs.
+            }
+
+            $column = $relation->type === RelationType::HasMany ? $resource->primaryKey : $relation->foreignKey;
+
+            if (!in_array($column, $columns, true)) {
+                $columns[] = $column;
+            }
+        }
+
+        return $columns;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $rows
+     * @param string[] $columns
+     * @return array<int, array<string, mixed>>
+     */
+    private function stripColumns(array $rows, array $columns): array
+    {
+        if ($columns === []) {
+            return $rows;
+        }
+
+        foreach ($rows as &$row) {
+            foreach ($columns as $column) {
+                unset($row[$column]);
+            }
+        }
+        unset($row);
+
+        return $rows;
+    }
+
+    /**
+     * Loads and attaches each requested relation onto $rows — a hasMany
+     * relation becomes an array under the relation name, a belongsTo becomes
+     * a single row or null. Runs one query per relation (not per row): all
+     * parent keys are gathered up front and matched with a single `IN (...)`
+     * query, scoped by the related resource's own `select` policy exactly
+     * like a direct request to it would be.
+     *
+     * @param array<int, array<string, mixed>> $rows
+     * @param array<string, string[]> $embeds Relation name => requested nested columns (empty means "all").
+     * @param array<string, mixed> $context
+     * @return array<int, array<string, mixed>>
+     * @throws Exceptions\ForbiddenException if a relation's target resource has no `select` policy registered.
+     * @throws Exceptions\ValidationException if a requested nested column isn't in the related resource's whitelist.
+     * @throws \LogicException if a relation's target table was never registered on this Api — a setup bug,
+     *                          not a client error, so it is deliberately not turned into an error Response.
+     */
+    private function embedRelations(Resource $resource, array $rows, array $embeds, array $context): array
+    {
+        if ($rows === [] || $embeds === []) {
+            return $rows;
+        }
+
+        foreach ($embeds as $name => $nestedColumns) {
+            $relation = $resource->relation($name)
+                ?? throw new \LogicException("Relation '{$name}' was validated but is missing — this is a bug in pdo-restify.");
+
+            $related = $this->resources[$relation->table]
+                ?? throw new \LogicException(
+                    "Relation '{$name}' on '{$resource->table}' points to table '{$relation->table}', "
+                    . "which is not registered on this Api. Did you forget to register() it?",
+                );
+
+            $allowed = $related->allowedColumns();
+
+            foreach ($nestedColumns as $column) {
+                if (!in_array($column, $allowed, true)) {
+                    throw new ValidationException("Unknown column '{$column}' on relation '{$name}'");
+                }
+            }
+
+            $joinColumn = $relation->type === RelationType::HasMany ? $relation->foreignKey : $related->primaryKey;
+            $localColumn = $relation->type === RelationType::HasMany ? $resource->primaryKey : $relation->foreignKey;
+
+            $selectColumns = $nestedColumns === [] ? $allowed : $nestedColumns;
+            $keepJoinColumn = in_array($joinColumn, $selectColumns, true);
+            if (!$keepJoinColumn) {
+                $selectColumns[] = $joinColumn;
+            }
+
+            $keys = array_values(array_unique(array_filter(
+                array_column($rows, $localColumn),
+                static fn (mixed $value): bool => $value !== null,
+            )));
+
+            $grouped = [];
+
+            if ($keys !== []) {
+                $conditions = ($related->policyFor(Operation::Select))($context);
+                $filters = [[$joinColumn, 'in', implode(',', $keys)]];
+
+                [$sql, $params] = QueryBuilder::select($related->table, $selectColumns, $filters, $conditions, null, null, 0);
+
+                $stmt = $this->pdo->prepare($sql);
+                $stmt->execute($params);
+
+                foreach ($stmt->fetchAll() as $relatedRow) {
+                    $key = $relatedRow[$joinColumn];
+
+                    if (!$keepJoinColumn) {
+                        unset($relatedRow[$joinColumn]);
+                    }
+
+                    if ($relation->type === RelationType::HasMany) {
+                        $grouped[$key][] = $relatedRow;
+                    } else {
+                        $grouped[$key] = $relatedRow;
+                    }
+                }
+            }
+
+            foreach ($rows as &$row) {
+                $key = $row[$localColumn] ?? null;
+
+                $row[$name] = $relation->type === RelationType::HasMany
+                    ? ($grouped[$key] ?? [])
+                    : ($grouped[$key] ?? null);
+            }
+            unset($row);
+        }
+
+        return $rows;
     }
 
     /**

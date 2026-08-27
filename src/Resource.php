@@ -22,6 +22,9 @@ final class Resource
     /** @var array<string, \Closure> Policy closures registered via {@see self::allow()}, keyed by {@see Operation::value}. */
     private array $policies = [];
 
+    /** @var array<string, Relation> Relations declared via {@see self::hasMany()} / {@see self::belongsTo()}, keyed by name. */
+    private array $relations = [];
+
     /**
      * @param string $table Table name. Validated so it can never carry SQL.
      * @param string $primaryKey Column used to address a single row (`GET|PATCH|DELETE /{table}/{id}`).
@@ -89,6 +92,67 @@ final class Resource
     {
         return $this->policies[$operation->value]
             ?? throw new ForbiddenException("Operation '{$operation->value}' is not allowed on '{$this->table}'");
+    }
+
+    /**
+     * Declares a "this resource has many related rows" relationship, e.g. a
+     * post has many comments. $foreignKey is the column on the *related*
+     * table (`comments.post_id`) that points back at this resource's
+     * {@see self::$primaryKey}.
+     *
+     * @param string $name Relation name, used as `select=...,{$name}(...)` and as the response key.
+     * @param string $foreignKey Column on the related table.
+     * @param string|null $table Related table name, if different from $name.
+     * @throws \InvalidArgumentException if $name, $foreignKey or $table is not a valid SQL identifier.
+     */
+    public function hasMany(string $name, string $foreignKey, ?string $table = null): static
+    {
+        return $this->addRelation(RelationType::HasMany, $name, $foreignKey, $table);
+    }
+
+    /**
+     * Declares a "this resource belongs to a related row" relationship, e.g.
+     * a comment belongs to a post. $foreignKey is the column on *this*
+     * resource's own table (`comments.post_id`) that points at the related
+     * resource's primary key.
+     *
+     * @param string $name Relation name, used as `select=...,{$name}(...)` and as the response key.
+     * @param string $foreignKey Column on this resource's own table.
+     * @param string|null $table Related table name, if different from $name.
+     * @throws \InvalidArgumentException if $name, $foreignKey or $table is not a valid SQL identifier.
+     */
+    public function belongsTo(string $name, string $foreignKey, ?string $table = null): static
+    {
+        return $this->addRelation(RelationType::BelongsTo, $name, $foreignKey, $table);
+    }
+
+    /**
+     * @return Relation|null The relation registered under $name, or null if none was declared.
+     */
+    public function relation(string $name): ?Relation
+    {
+        return $this->relations[$name] ?? null;
+    }
+
+    /**
+     * @return string[] Names of relations declared via {@see self::hasMany()} / {@see self::belongsTo()}.
+     */
+    public function relationNames(): array
+    {
+        return array_keys($this->relations);
+    }
+
+    private function addRelation(RelationType $type, string $name, string $foreignKey, ?string $table): static
+    {
+        self::assertIdentifier($name);
+        self::assertIdentifier($foreignKey);
+
+        $table ??= $name;
+        self::assertIdentifier($table);
+
+        $this->relations[$name] = new Relation($type, $table, $foreignKey);
+
+        return $this;
     }
 
     /**

@@ -22,6 +22,8 @@ final class QueryBuilder
      * @param array<int, array{0: string, 1: string, 2: string}> $filters Tuples of [column, operator, rawValue], as returned by {@see Filters::parse()}.
      * @param array<string, mixed> $conditions Equality conditions (e.g. from a {@see Resource} policy), ANDed with $filters.
      * @param array{0: string, 1: string}|null $order [column, direction] as returned by {@see Filters::order()}.
+     * @param int|null $limit Null omits the LIMIT/OFFSET clause entirely — used internally when
+     *                        loading relations, where every matching related row is wanted.
      * @return array{0: string, 1: array<string, mixed>}
      */
     public static function select(
@@ -30,7 +32,7 @@ final class QueryBuilder
         array $filters,
         array $conditions,
         ?array $order,
-        int $limit,
+        ?int $limit,
         int $offset,
     ): array {
         $select = implode(', ', $columns);
@@ -45,7 +47,9 @@ final class QueryBuilder
             $sql .= " ORDER BY {$order[0]} " . strtoupper($order[1]);
         }
 
-        $sql .= " LIMIT {$limit} OFFSET {$offset}";
+        if ($limit !== null) {
+            $sql .= " LIMIT {$limit} OFFSET {$offset}";
+        }
 
         return [$sql, $params];
     }

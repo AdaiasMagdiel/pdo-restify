@@ -2,6 +2,8 @@
 
 use AdaiasMagdiel\PdoRestify\Exceptions\ForbiddenException;
 use AdaiasMagdiel\PdoRestify\Operation;
+use AdaiasMagdiel\PdoRestify\Relation;
+use AdaiasMagdiel\PdoRestify\RelationType;
 use AdaiasMagdiel\PdoRestify\Resource;
 
 it('rejects invalid table identifiers', function () {
@@ -33,3 +35,33 @@ it('allows an operation with no scoping when no policy is given', function () {
 
     expect(($resource->policyFor(Operation::Select))([]))->toBe([]);
 });
+
+it('declares a hasMany relation, defaulting the table to the relation name', function () {
+    $resource = (new Resource('posts'))->hasMany('comments', foreignKey: 'post_id');
+
+    $relation = $resource->relation('comments');
+
+    expect($relation)->toBeInstanceOf(Relation::class);
+    expect($relation->type)->toBe(RelationType::HasMany);
+    expect($relation->table)->toBe('comments');
+    expect($relation->foreignKey)->toBe('post_id');
+    expect($resource->relationNames())->toBe(['comments']);
+});
+
+it('declares a belongsTo relation with an explicit table name', function () {
+    $resource = (new Resource('comments'))->belongsTo('post', foreignKey: 'post_id', table: 'posts');
+
+    $relation = $resource->relation('post');
+
+    expect($relation->type)->toBe(RelationType::BelongsTo);
+    expect($relation->table)->toBe('posts');
+    expect($relation->foreignKey)->toBe('post_id');
+});
+
+it('returns null for an undeclared relation', function () {
+    expect((new Resource('posts'))->relation('comments'))->toBeNull();
+});
+
+it('rejects an invalid identifier in a relation declaration', function () {
+    (new Resource('posts'))->hasMany('comments', foreignKey: 'post_id; DROP TABLE users');
+})->throws(InvalidArgumentException::class);

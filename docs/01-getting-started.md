@@ -92,3 +92,5 @@ gives you (a session, a JWT claim, a framework's `Auth::user()`, ...).
   policies in depth — this is the part worth reading carefully before you
   expose anything beyond a toy example.
 - [Querying](04-querying.md) for the full filter/pagination syntax.
+- [Relationships](09-relationships.md) to embed related rows (e.g. a post's
+  comments) alongside a resource, in one request.

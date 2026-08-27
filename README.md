@@ -119,6 +119,11 @@ Supported filter operators: `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `like`
 including how `AND`/pagination/limits interact, in
 [Querying](docs/04-querying.md).
 
+`select=` can also embed related rows — `select=id,title,comments(id,body)`
+— declared with `->hasMany()`/`->belongsTo()` on a `Resource`, scoped by the
+related resource's own policy just like a direct request to it. See
+[Relationships](docs/09-relationships.md).
+
 ## Routes
 
 `Api::handle()` dispatches based on `Request::$path` and `Request::$method`:
@@ -158,7 +163,8 @@ on GitHub Actions. Those tests skip themselves locally and only run in CI.
 
 ## Roadmap
 
-- Relationships / embedded resources (joins)
+- Nested embeds (`comments(replies(*))`), many-to-many/`hasOne` relations,
+  and filter/order/pagination on embedded relations
 - Per-row results for partially-failed bulk requests
 - Pluggable authentication helpers
 - RPC-style calls to stored procedures/functions

@@ -26,11 +26,18 @@ error code or field-level validation detail in this version — see the main
 | `400` | `BadRequestException` | Unsupported HTTP method, a `PATCH`/`PUT`/`DELETE` with no id in the path, or a `PATCH`/`PUT`/`DELETE` with no id whose body also isn't a valid bulk list. |
 | `403` | `ForbiddenException` | The operation (`select`/`insert`/`update`/`delete`) has no policy registered on the resource, or a policy closure throws it itself. |
 | `404` | `NotFoundException` | The resource/table isn't registered, or no row matches the requested id once the policy's conditions are applied. |
-| `422` | `ValidationException` | A filter/select/order column isn't in the resource's whitelist, a filter is missing its `operator.` prefix or uses an unknown operator, an insert/update body is empty or references an unknown column, a bulk update row is missing the primary key, or a bulk delete id isn't a scalar. |
+| `422` | `ValidationException` | A filter/select/order column isn't in the resource's whitelist, a filter is missing its `operator.` prefix or uses an unknown operator, an insert/update body is empty or references an unknown column, a bulk update row is missing the primary key, a bulk delete id isn't a scalar, or a `select=` relation embed is malformed/unknown/references a column outside the related resource's whitelist. |
 
 A bulk insert/update/delete failure at any row rolls back the whole batch and
 reports a single error for the failing row — see
 [Bulk operations](08-bulk-operations.md#all-rows-commit-together-or-none-do).
+
+**Not a 4xx**: requesting an embed whose relation points at a table that was
+never `register()`'d on the `Api` throws a plain `\LogicException`, which
+escapes `handle()` uncaught. That's deliberate — it's a setup bug (a
+`hasMany()`/`belongsTo()` call pointing at a resource that doesn't exist on
+this `Api`), not something a client did wrong, so it isn't turned into a
+JSON error response. See [Relationships](09-relationships.md#gotchas).
 
 ## 404 vs. 403 on row access
 

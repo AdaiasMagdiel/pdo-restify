@@ -86,27 +86,122 @@ final class Filters
     }
 
     /**
-     * Resolves a `select=col1,col2` param against the whitelist, defaulting
-     * to every allowed column when none is given.
+     * Resolves a `select=col1,col2,relation(col1,col2)` param against the
+     * whitelist, defaulting to every allowed column when no plain column is
+     * requested (embeds alone don't replace the flat column list, only add
+     * to it).
      *
      * @param string[] $allowedColumns
-     * @return string[]
-     * @throws ValidationException if a requested column is outside the whitelist.
+     * @param string[] $allowedRelations Names of relations declared on the resource
+     *                                    (see {@see Resource::relationNames()}).
+     * @return array{0: string[], 1: array<string, string[]>} [flat columns, embeds keyed by relation name].
+     *         An embed's column list is empty when the caller wrote `relation()` with nothing inside,
+     *         meaning "every column that relation's resource allows".
+     * @throws ValidationException if a requested column or relation is outside the whitelist,
+     *                              or the embed syntax is malformed (unbalanced parentheses, empty
+     *                              relation column list).
      */
-    public static function select(?string $select, array $allowedColumns): array
+    public static function select(?string $select, array $allowedColumns, array $allowedRelations = []): array
     {
         if ($select === null || $select === '') {
-            return $allowedColumns;
+            return [$allowedColumns, []];
         }
 
-        $columns = array_map('trim', explode(',', $select));
+        $columns = [];
+        $embeds = [];
 
-        foreach ($columns as $column) {
-            if (!in_array($column, $allowedColumns, true)) {
-                throw new ValidationException("Unknown select column: {$column}");
+        foreach (self::tokenizeSelect($select) as $token) {
+            if ($token['columns'] === null) {
+                if (!in_array($token['name'], $allowedColumns, true)) {
+                    throw new ValidationException("Unknown select column: {$token['name']}");
+                }
+
+                $columns[] = $token['name'];
+
+                continue;
             }
+
+            if (!in_array($token['name'], $allowedRelations, true)) {
+                throw new ValidationException("Unknown relation: {$token['name']}");
+            }
+
+            $embeds[$token['name']] = $token['columns'];
         }
 
-        return $columns;
+        if ($columns === []) {
+            $columns = $allowedColumns;
+        }
+
+        return [$columns, $embeds];
+    }
+
+    /**
+     * Splits a `select=` value into tokens, respecting one level of
+     * `relation(...)` nesting so commas inside parentheses don't split the
+     * relation's own column list.
+     *
+     * @return array<int, array{name: string, columns: string[]|null}> `columns` is null for a plain column.
+     * @throws ValidationException on unbalanced parentheses or an empty relation column list.
+     */
+    private static function tokenizeSelect(string $select): array
+    {
+        $rawTokens = [];
+        $buffer = '';
+        $depth = 0;
+
+        for ($i = 0, $len = strlen($select); $i < $len; $i++) {
+            $char = $select[$i];
+
+            if ($char === '(') {
+                $depth++;
+            } elseif ($char === ')') {
+                $depth--;
+
+                if ($depth < 0) {
+                    throw new ValidationException('Unbalanced parentheses in select');
+                }
+            }
+
+            if ($char === ',' && $depth === 0) {
+                $rawTokens[] = $buffer;
+                $buffer = '';
+
+                continue;
+            }
+
+            $buffer .= $char;
+        }
+
+        if ($depth !== 0) {
+            throw new ValidationException('Unbalanced parentheses in select');
+        }
+
+        $rawTokens[] = $buffer;
+
+        $tokens = [];
+
+        foreach ($rawTokens as $rawToken) {
+            $rawToken = trim($rawToken);
+
+            if ($rawToken === '') {
+                throw new ValidationException('Empty select token');
+            }
+
+            if (!preg_match('/^([a-zA-Z_][a-zA-Z0-9_]*)\((.*)\)$/s', $rawToken, $matches)) {
+                $tokens[] = ['name' => $rawToken, 'columns' => null];
+
+                continue;
+            }
+
+            $nestedColumns = $matches[2] === '' ? [] : array_map('trim', explode(',', $matches[2]));
+
+            if (in_array('', $nestedColumns, true)) {
+                throw new ValidationException("Empty column in relation '{$matches[1]}'");
+            }
+
+            $tokens[] = ['name' => $matches[1], 'columns' => $nestedColumns];
+        }
+
+        return $tokens;
     }
 }

@@ -7,6 +7,8 @@ further detail (every method also carries a PHPDoc block).
 - [`Connection`](#connection)
 - [`Resource`](#resource)
 - [`Operation`](#operation)
+- [`Relation`](#relation)
+- [`RelationType`](#relationtype)
 - [`Api`](#api)
 - [`Filters`](#filters)
 - [`QueryBuilder`](#querybuilder)
@@ -105,6 +107,44 @@ Returns the closure registered via `allow()` for `$operation`. Throws
 `Exceptions\ForbiddenException` if that operation was never enabled. Mostly
 used internally by `Api`; rarely called directly.
 
+### `hasMany()`
+
+```php
+public function hasMany(string $name, string $foreignKey, ?string $table = null): static
+```
+
+Declares that this resource has many related rows, e.g. a post has many
+comments. `$foreignKey` is the column on the *related* table pointing back
+at this resource's primary key. `$table` defaults to `$name`. See
+[Relationships](09-relationships.md). Returns `$this` for chaining.
+
+### `belongsTo()`
+
+```php
+public function belongsTo(string $name, string $foreignKey, ?string $table = null): static
+```
+
+Declares that this resource belongs to one related row, e.g. a comment
+belongs to a post. `$foreignKey` is the column on *this resource's own*
+table pointing at the related resource's primary key. `$table` defaults to
+`$name`. Returns `$this` for chaining.
+
+### `relation()`
+
+```php
+public function relation(string $name): ?Relation
+```
+
+Returns the `Relation` declared under `$name`, or `null` if none was.
+
+### `relationNames()`
+
+```php
+public function relationNames(): array
+```
+
+@return `string[]` — names of every relation declared via `hasMany()`/`belongsTo()`.
+
 ### `assertIdentifier()`
 
 ```php
@@ -135,6 +175,39 @@ Used as the first argument to `Resource::allow()`/`policyFor()`; passing
 anything else there is a `TypeError`, not a runtime validation failure —
 invalid operations are caught by the language itself, not by pdo-restify's
 own code.
+
+---
+
+## `Relation`
+
+```php
+final class Relation
+{
+    public function __construct(
+        public readonly RelationType $type,
+        public readonly string $table,
+        public readonly string $foreignKey,
+    )
+}
+```
+
+Value object returned by `Resource::relation()`, describing one relation
+declared via `hasMany()`/`belongsTo()`. Not constructed directly in normal
+use. See [Relationships](09-relationships.md).
+
+---
+
+## `RelationType`
+
+```php
+enum RelationType: string
+{
+    case HasMany = 'hasMany';
+    case BelongsTo = 'belongsTo';
+}
+```
+
+The two relationship shapes a `Resource` can declare.
 
 ---
 
@@ -178,8 +251,8 @@ into an error `Response` (see [Error handling](06-error-handling.md)).
 
 | Method | Path | Action |
 |---|---|---|
-| `GET` | `/{table}` | List rows, filters/select/order/pagination apply. |
-| `GET` | `/{table}/{id}` | Fetch a single row. |
+| `GET` | `/{table}` | List rows, filters/select/order/pagination apply; `select=` can embed relations. |
+| `GET` | `/{table}/{id}` | Fetch a single row; `select=` can embed relations. |
 | `POST` | `/{table}` | Insert a row, or bulk-insert if the body is a list of objects. |
 | `PATCH` or `PUT` | `/{table}/{id}` | Update a row. |
 | `PATCH` or `PUT` | `/{table}` | Bulk-update rows; each body object must include the primary key. |
@@ -187,7 +260,8 @@ into an error `Response` (see [Error handling](06-error-handling.md)).
 | `DELETE` | `/{table}` | Bulk-delete rows; body is a list of primary key values. |
 
 See [Bulk operations](08-bulk-operations.md) for the bulk insert/update/delete
-request and response shape, and the all-or-nothing transaction semantics.
+request and response shape, and the all-or-nothing transaction semantics; see
+[Relationships](09-relationships.md) for `select=relation(...)` embeds.
 
 ---
 
@@ -222,12 +296,20 @@ direction.
 ### `Filters::select()`
 
 ```php
-public static function select(?string $select, array $allowedColumns): array
+public static function select(?string $select, array $allowedColumns, array $allowedRelations = []): array
 ```
 
-Resolves a comma-separated `select=` value against `$allowedColumns`,
-defaulting to the full whitelist when `$select` is `null`/empty. Throws
-`Exceptions\ValidationException` on a non-whitelisted column.
+Resolves a `select=col1,col2,relation(col1,col2)` value. Returns
+`[flatColumns, embeds]`, where `embeds` is `[relationName => nestedColumns]`
+(`nestedColumns` empty means "every column that relation's resource
+allows"). `$select` `null`/empty resolves to `[$allowedColumns, []]`. Plain
+columns are validated against `$allowedColumns`, relation names against
+`$allowedRelations` — nested embed columns are *not* validated here (that
+needs the related resource's own whitelist, which `Api::embedRelations()`
+checks once it has it). Throws `Exceptions\ValidationException` on a
+non-whitelisted column, an undeclared relation name, or malformed embed
+syntax (unbalanced parentheses, an empty column). See
+[Relationships](09-relationships.md).
 
 ---
 
@@ -239,11 +321,15 @@ ready for `PDO::prepare()`/`PDOStatement::execute()`. Used internally by
 call directly.
 
 ```php
-public static function select(string $table, array $columns, array $filters, array $conditions, ?array $order, int $limit, int $offset): array
+public static function select(string $table, array $columns, array $filters, array $conditions, ?array $order, ?int $limit, int $offset): array
 public static function insert(string $table, array $data): array
 public static function update(string $table, array $data, array $conditions): array
 public static function delete(string $table, array $conditions): array
 ```
+
+`select()`'s `$limit` of `null` omits the `LIMIT`/`OFFSET` clause entirely —
+used internally when loading a relation, where every matching related row is
+wanted.
 
 Every value ends up bound as a parameter; the only strings interpolated
 into the SQL are identifiers the caller has already validated (see
