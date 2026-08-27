@@ -184,8 +184,9 @@ into an error `Response` (see [Error handling](06-error-handling.md)).
 | `PATCH` or `PUT` | `/{table}/{id}` | Update a row. |
 | `PATCH` or `PUT` | `/{table}` | Bulk-update rows; each body object must include the primary key. |
 | `DELETE` | `/{table}/{id}` | Delete a row. |
+| `DELETE` | `/{table}` | Bulk-delete rows; body is a list of primary key values. |
 
-See [Bulk operations](08-bulk-operations.md) for the bulk insert/update
+See [Bulk operations](08-bulk-operations.md) for the bulk insert/update/delete
 request and response shape, and the all-or-nothing transaction semantics.
 
 ---

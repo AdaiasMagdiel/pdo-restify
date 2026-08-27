@@ -170,3 +170,15 @@ it('bulk updates every row identified by its primary key', function () {
     expect($response->status)->toBe(200);
     expect($response->body)->toHaveCount(2);
 });
+
+it('bulk deletes every row identified by its primary key', function () {
+    $response = $this->api->handle(
+        new Request('DELETE', '/posts', body: [1, 2]),
+        ['user_id' => 1],
+    );
+
+    expect($response->status)->toBe(204);
+
+    $count = $this->pdo->query('SELECT COUNT(*) FROM posts')->fetchColumn();
+    expect((int) $count)->toBe(1);
+});

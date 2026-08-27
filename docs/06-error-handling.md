@@ -23,12 +23,12 @@ error code or field-level validation detail in this version — see the main
 
 | Status | Exception | When |
 |---|---|---|
-| `400` | `BadRequestException` | Unsupported HTTP method, a `PATCH`/`PUT`/`DELETE` with no id in the path, or a `PATCH`/`PUT` with no id whose body also isn't a valid bulk list. |
+| `400` | `BadRequestException` | Unsupported HTTP method, a `PATCH`/`PUT`/`DELETE` with no id in the path, or a `PATCH`/`PUT`/`DELETE` with no id whose body also isn't a valid bulk list. |
 | `403` | `ForbiddenException` | The operation (`select`/`insert`/`update`/`delete`) has no policy registered on the resource, or a policy closure throws it itself. |
 | `404` | `NotFoundException` | The resource/table isn't registered, or no row matches the requested id once the policy's conditions are applied. |
-| `422` | `ValidationException` | A filter/select/order column isn't in the resource's whitelist, a filter is missing its `operator.` prefix or uses an unknown operator, an insert/update body is empty or references an unknown column, or a bulk update row is missing the primary key. |
+| `422` | `ValidationException` | A filter/select/order column isn't in the resource's whitelist, a filter is missing its `operator.` prefix or uses an unknown operator, an insert/update body is empty or references an unknown column, a bulk update row is missing the primary key, or a bulk delete id isn't a scalar. |
 
-A bulk insert/update failure at any row rolls back the whole batch and
+A bulk insert/update/delete failure at any row rolls back the whole batch and
 reports a single error for the failing row — see
 [Bulk operations](08-bulk-operations.md#all-rows-commit-together-or-none-do).
 

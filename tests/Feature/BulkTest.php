@@ -113,3 +113,45 @@ it('still requires an id for a non-bulk PATCH with no id', function () {
 
     expect($response->status)->toBe(400);
 });
+
+it('bulk deletes every row identified by its primary key, scoped to the policy', function () {
+    $response = $this->api->handle(
+        new Request('DELETE', '/posts', body: [1, 2]),
+        ['user_id' => 1],
+    );
+
+    expect($response->status)->toBe(204);
+
+    $count = $this->pdo->query('SELECT COUNT(*) FROM posts')->fetchColumn();
+    expect((int) $count)->toBe(1);
+});
+
+it('rolls back the entire bulk delete if any id is outside the policy', function () {
+    $response = $this->api->handle(
+        new Request('DELETE', '/posts', body: [1, 3]),
+        ['user_id' => 1],
+    );
+
+    expect($response->status)->toBe(404);
+
+    $count = $this->pdo->query('SELECT COUNT(*) FROM posts')->fetchColumn();
+    expect((int) $count)->toBe(3);
+});
+
+it('rejects a bulk delete id that is not a scalar', function () {
+    $response = $this->api->handle(
+        new Request('DELETE', '/posts', body: [1, ['id' => 2]]),
+        ['user_id' => 1],
+    );
+
+    expect($response->status)->toBe(422);
+
+    $count = $this->pdo->query('SELECT COUNT(*) FROM posts')->fetchColumn();
+    expect((int) $count)->toBe(3);
+});
+
+it('still requires an id for a non-bulk DELETE with no id', function () {
+    $response = $this->api->handle(new Request('DELETE', '/posts'), ['user_id' => 1]);
+
+    expect($response->status)->toBe(400);
+});

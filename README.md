@@ -131,9 +131,10 @@ including how `AND`/pagination/limits interact, in
 | PATCH   | `/{table}/{id}`  | Update a row                    |
 | PATCH   | `/{table}`       | Bulk-update rows (each object must include the primary key) |
 | DELETE  | `/{table}/{id}`  | Delete a row                    |
+| DELETE  | `/{table}`       | Bulk-delete rows (body is a list of ids) |
 
-`POST`/`PATCH` bulk requests run in a single transaction — one bad row rolls
-back the whole batch. See [Bulk operations](docs/08-bulk-operations.md).
+`POST`/`PATCH`/`DELETE` bulk requests run in a single transaction — one bad
+row rolls back the whole batch. See [Bulk operations](docs/08-bulk-operations.md).
 
 ## Testing
 
@@ -158,7 +159,7 @@ on GitHub Actions. Those tests skip themselves locally and only run in CI.
 ## Roadmap
 
 - Relationships / embedded resources (joins)
-- Bulk delete, and per-row results for partially-failed bulk requests
+- Per-row results for partially-failed bulk requests
 - Pluggable authentication helpers
 - RPC-style calls to stored procedures/functions
 

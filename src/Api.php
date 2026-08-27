@@ -89,7 +89,7 @@ final class Api
                     : $this->bulkUpdate($resource, $request->body, $context),
                 'DELETE' => $id !== null
                     ? $this->delete($resource, $id, $context)
-                    : throw new BadRequestException('An id is required to delete a resource'),
+                    : $this->bulkDelete($resource, $request->body, $context),
                 default => throw new BadRequestException("Unsupported method: {$request->method}"),
             };
         } catch (ApiException $e) {
@@ -337,6 +337,48 @@ final class Api
         if ($stmt->rowCount() === 0) {
             throw new NotFoundException("Resource '{$resource->table}' with id '{$id}' not found");
         }
+
+        return Response::json(null, 204);
+    }
+
+    /**
+     * Handles `DELETE /{table}` with no id — a bulk delete. $body must be a
+     * list of primary key values (`[1, 2, 3]`), each identifying a row to
+     * delete. Runs in a single transaction — if any id fails (unknown, or
+     * outside the policy's conditions), none of them are deleted.
+     *
+     * @param array<string, mixed> $body
+     * @param array<string, mixed> $context
+     * @throws Exceptions\BadRequestException if $body isn't a non-empty list of ids.
+     * @throws Exceptions\ValidationException if an id is itself an array/object.
+     * @throws Exceptions\ForbiddenException if `delete` has no policy registered.
+     * @throws Exceptions\NotFoundException if an id has no match under the policy conditions.
+     */
+    private function bulkDelete(Resource $resource, array $body, array $context): Response
+    {
+        if ($body === [] || !array_is_list($body)) {
+            throw new BadRequestException(
+                'An id is required to delete a resource, or send a list of ids to delete in bulk',
+            );
+        }
+
+        $this->pdo->beginTransaction();
+
+        try {
+            foreach ($body as $id) {
+                if (is_array($id)) {
+                    throw new ValidationException('Each id must be a scalar value');
+                }
+
+                $this->delete($resource, (string) $id, $context);
+            }
+        } catch (\Throwable $e) {
+            $this->pdo->rollBack();
+
+            throw $e;
+        }
+
+        $this->pdo->commit();
 
         return Response::json(null, 204);
     }
