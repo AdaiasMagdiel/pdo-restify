@@ -1,6 +1,9 @@
 # pdo-restify
 
 [![Tests](https://github.com/adaiasmagdiel/pdo-restify/actions/workflows/tests.yml/badge.svg)](https://github.com/adaiasmagdiel/pdo-restify/actions/workflows/tests.yml)
+[![Latest Version](https://img.shields.io/packagist/v/adaiasmagdiel/pdo-restify.svg)](https://packagist.org/packages/adaiasmagdiel/pdo-restify)
+[![Total Downloads](https://img.shields.io/packagist/dt/adaiasmagdiel/pdo-restify.svg)](https://packagist.org/packages/adaiasmagdiel/pdo-restify)
+[![License](https://img.shields.io/packagist/l/adaiasmagdiel/pdo-restify.svg)](LICENSE)
 
 A small, framework-agnostic REST API layer on top of PDO. It exposes whitelisted
 database tables as CRUD endpoints — inspired by [PostgREST](https://postgrest.org/)
