@@ -21,10 +21,10 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           extensions: pdo, pdo_sqlite
-          coverage: none
+          coverage: pcov
 
       - name: Install dependencies
         uses: ramsey/composer-install@v3
 
-      - name: Run tests
-        run: composer test
+      - name: Run tests with coverage
+        run: composer test:coverage

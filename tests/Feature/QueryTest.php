@@ -50,6 +50,30 @@ it('applies the gt operator against real data, not just against the generated SQ
     expect(array_column($response->body, 'id'))->toBe([2, 3]);
 });
 
+it('applies the ne operator against real data', function () {
+    $response = $this->api->handle(new Request('GET', '/posts', ['title' => 'ne.Second', 'order' => 'id.asc']), []);
+
+    expect(array_column($response->body, 'id'))->toBe([1, 3]);
+});
+
+it('applies the lt operator against real data', function () {
+    $response = $this->api->handle(new Request('GET', '/posts', ['id' => 'lt.3', 'order' => 'id.asc']), []);
+
+    expect(array_column($response->body, 'id'))->toBe([1, 2]);
+});
+
+it('applies the gte operator against real data', function () {
+    $response = $this->api->handle(new Request('GET', '/posts', ['id' => 'gte.2', 'order' => 'id.asc']), []);
+
+    expect(array_column($response->body, 'id'))->toBe([2, 3]);
+});
+
+it('applies the lte operator against real data', function () {
+    $response = $this->api->handle(new Request('GET', '/posts', ['id' => 'lte.2', 'order' => 'id.asc']), []);
+
+    expect(array_column($response->body, 'id'))->toBe([1, 2]);
+});
+
 it('applies the in operator against real data', function () {
     $response = $this->api->handle(new Request('GET', '/posts', ['id' => 'in.1,3', 'order' => 'id.asc']), []);
 

@@ -40,6 +40,10 @@ it('rejects an order column outside the whitelist', function () {
     Filters::order('secret.asc', ['title']);
 })->throws(ValidationException::class);
 
+it('rejects an unknown order direction', function () {
+    Filters::order('title.sideways', ['title']);
+})->throws(ValidationException::class);
+
 it('resolves selected columns against the whitelist', function () {
     expect(Filters::select('id,title', ['id', 'title', 'body']))->toBe(['id', 'title']);
     expect(Filters::select(null, ['id', 'title']))->toBe(['id', 'title']);

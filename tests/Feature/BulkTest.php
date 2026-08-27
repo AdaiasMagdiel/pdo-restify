@@ -49,6 +49,21 @@ it('rolls back the entire bulk insert if any row is invalid', function () {
     expect((int) $count)->toBe(3);
 });
 
+it('rejects a bulk insert row that is not an object', function () {
+    $response = $this->api->handle(
+        new Request('POST', '/posts', body: [
+            ['title' => 'A', 'body' => 'Body A', 'user_id' => 1],
+            'not an object',
+        ]),
+        ['user_id' => 1],
+    );
+
+    expect($response->status)->toBe(422);
+
+    $count = $this->pdo->query('SELECT COUNT(*) FROM posts')->fetchColumn();
+    expect((int) $count)->toBe(3);
+});
+
 it('bulk updates every row identified by its primary key, scoped to the policy', function () {
     $response = $this->api->handle(
         new Request('PATCH', '/posts', body: [

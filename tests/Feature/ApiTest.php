@@ -92,6 +92,35 @@ it('deletes a row scoped to the policy', function () {
     expect((int) $count)->toBe(2);
 });
 
+it('returns 404 deleting a row owned by another user', function () {
+    $response = $this->api->handle(new Request('DELETE', '/posts/3'), ['user_id' => 1]);
+
+    expect($response->status)->toBe(404);
+
+    $count = $this->pdo->query('SELECT COUNT(*) FROM posts')->fetchColumn();
+    expect((int) $count)->toBe(3);
+});
+
+it('rejects an insert with an empty body', function () {
+    // Uses an unscoped insert policy: ownedPostsApi()'s policy always forces
+    // a user_id condition into the insert, so $data would never be empty.
+    $resource = (new Resource('posts'))
+        ->columns(['id', 'title', 'body', 'user_id'])
+        ->allow('insert');
+
+    $api = (new Api($this->pdo))->register($resource);
+
+    $response = $api->handle(new Request('POST', '/posts', body: []), []);
+
+    expect($response->status)->toBe(422);
+});
+
+it('rejects an update with nothing to change', function () {
+    $response = $this->api->handle(new Request('PATCH', '/posts/1', body: []), ['user_id' => 1]);
+
+    expect($response->status)->toBe(422);
+});
+
 it('rejects unknown columns in the request body', function () {
     $response = $this->api->handle(
         new Request('POST', '/posts', body: ['title' => 'New', 'body' => 'x', 'user_id' => 1, 'is_admin' => 1]),

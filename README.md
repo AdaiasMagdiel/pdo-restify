@@ -141,6 +141,13 @@ database:
 composer test
 ```
 
+Coverage requires Xdebug or PCOV (`composer test:coverage`, enforced at
+95%+ in CI). Locally, with Xdebug installed:
+
+```bash
+XDEBUG_MODE=coverage composer test:coverage
+```
+
 MySQL and MariaDB compatibility is checked separately, against real service
 containers, by the [Integration workflow](.github/workflows/integration.yml)
 on GitHub Actions. Those tests skip themselves locally and only run in CI.

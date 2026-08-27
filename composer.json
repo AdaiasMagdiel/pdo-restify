@@ -31,7 +31,8 @@
         }
     },
     "scripts": {
-        "test": "pest"
+        "test": "pest",
+        "test:coverage": "pest --coverage --min=95"
     },
     "minimum-stability": "stable",
     "prefer-stable": true,
