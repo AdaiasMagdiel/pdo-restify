@@ -77,6 +77,49 @@ query string or body. That's intentional: a policy answers "what is this
 caller allowed to touch", a question that should only depend on who they
 are, never on what they're asking for.
 
+### Public read, admin-only write
+
+Probably the single most common shape: anyone can read, only admins can
+change anything. It's just the "no policy at all" and "role-based" pieces
+above, combined on one resource:
+
+```php
+use AdaiasMagdiel\PdoRestify\Exceptions\ForbiddenException;
+
+$posts = (new Resource('posts'))
+    ->columns(['id', 'title', 'body', 'user_id']);
+
+$adminOnly = function (array $context): array {
+    if (($context['role'] ?? null) !== 'admin') {
+        throw new ForbiddenException('Admins only');
+    }
+
+    return []; // an admin isn't scoped to their own rows either
+};
+
+$posts
+    ->allow('select')                // no closure — public, unrestricted read
+    ->allow('insert', $adminOnly)
+    ->allow('update', $adminOnly)
+    ->allow('delete', $adminOnly);
+```
+
+`GET /posts` and `GET /posts/{id}` work for anyone, with no `$context`
+required at all (you can call `handle($request, [])`). `POST`/`PATCH`/`DELETE`
+throw `403` for anyone whose context doesn't say `role: admin` — which your
+application decides and builds before calling `handle()`, typically by
+reading it off the authenticated session/token:
+
+```php
+$context = $currentUser !== null ? ['role' => $currentUser->role] : [];
+
+$response = $api->handle($request, $context);
+```
+
+Nothing here is a new mechanism — it's the exact same `allow()`/policy API
+used everywhere else in this guide, just applied per operation on the same
+resource rather than uniformly across all four.
+
 ### Multi-tenant example
 
 ```php

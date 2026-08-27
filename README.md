@@ -100,7 +100,8 @@ fake it either — it gives you the pieces and leaves the decision to you:
   are always bound as parameters, never interpolated.
 
 See [Resources & security model](docs/03-resources-and-security.md) for the
-full guide, with multi-tenant and role-based policy examples.
+full guide, including a ready-made "public read, admin-only write" recipe
+plus multi-tenant and role-based policy examples.
 
 ## Query string
 
