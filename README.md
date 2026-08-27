@@ -19,6 +19,10 @@ resources & the security model, querying, framework integration, error
 handling, tips, and a complete API reference. The sections below are a
 quick overview; the docs go deeper on every one of them.
 
+🟨 **[JS/TS client](clients/js/README.md)** — a typed, dependency-free
+`fetch`-based client for consuming a pdo-restify API from JS/TS (browser,
+Node, or edge), published as [`@adaiasmagdiel/pdo-restify`](https://www.npmjs.com/package/@adaiasmagdiel/pdo-restify).
+
 ## Install
 
 ```bash

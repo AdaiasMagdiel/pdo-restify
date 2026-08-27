@@ -1,0 +1,60 @@
+name: JS client
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'clients/js/**'
+      - 'src/**'
+      - 'composer.json'
+      - '.github/workflows/js-client.yml'
+  pull_request:
+    paths:
+      - 'clients/js/**'
+      - 'src/**'
+      - 'composer.json'
+      - '.github/workflows/js-client.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['18', '20', '22']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo, pdo_sqlite
+          coverage: none
+
+      - name: Install PHP dependencies
+        uses: ramsey/composer-install@v3
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: clients/js/package-lock.json
+
+      - name: Install JS dependencies
+        working-directory: clients/js
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: clients/js
+        run: npm run typecheck
+
+      - name: Run tests (mocked + real end-to-end against a live PHP server)
+        working-directory: clients/js
+        run: npm test
+
+      - name: Build
+        working-directory: clients/js
+        run: npm run build
