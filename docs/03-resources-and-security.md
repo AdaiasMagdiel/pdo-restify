@@ -69,7 +69,12 @@ What this buys you, concretely:
   the `WHERE` clause — a caller can send a valid id that isn't theirs, and
   the operation still fails as if the row didn't exist (`404`, not `403` —
   see [Error handling](06-error-handling.md) for why that's the right status
-  to leak).
+  to leak). `update` *also* merges the same conditions back over the write
+  data, exactly like `insert` — so a column the policy uses to scope rows
+  can never be reassigned by the client just because it's also writable.
+  Without this, a caller could `PATCH` a row they own while smuggling a
+  different `user_id`/`tenant_id` into the same request body, transferring
+  it away from themselves (or, worse, into someone else's data).
 
 A policy always receives the `$context` array passed as `Api::handle()`'s
 second argument, and nothing else — it has no access to the request path,
@@ -192,17 +197,24 @@ stay scoped.
 Two independent mechanisms keep every generated query safe, regardless of
 what a policy or a caller sends:
 
-- **Identifiers** (table names, column names) only ever reach the SQL string
-  after passing `Resource::assertIdentifier()` — a single, strict regex
-  (`^[a-zA-Z_][a-zA-Z0-9_]*$`). There is no code path that puts an
+- **Identifiers** (table names, column names — including a policy's
+  condition *keys*, e.g. the `user_id` in `['user_id' => ...]`) only ever
+  reach the SQL string after passing `Resource::assertIdentifier()` — a
+  single, strict regex (`^[a-zA-Z_][a-zA-Z0-9_]*$`). `QueryBuilder` itself
+  re-checks every identifier it's given, unconditionally, rather than
+  trusting its caller to have done so — there is no code path that puts an
   unvalidated identifier into a query.
-- **Values** (filter values, insert/update data, policy conditions) are
-  never interpolated. They're always passed through as bound parameters to
-  `PDOStatement::execute()`. See `QueryBuilder` in the
+- **Values** (filter values, insert/update data, policy condition *values*)
+  are never interpolated. They're always passed through as bound parameters
+  to `PDOStatement::execute()`. See `QueryBuilder` in the
   [API reference](api-reference.md) if you want to see exactly how.
 
-This is why a policy closure is trusted to return arbitrary values in its
+This is why a policy closure is trusted to return arbitrary *values* in its
 conditions array (`['user_id' => $context['user_id']]`) without validating
 them itself — those values are bound, not interpolated, so there's no
 injection surface even if `$context['user_id']` were attacker-controlled
-(it shouldn't be, but the query layer doesn't depend on that).
+(it shouldn't be, but the query layer doesn't depend on that). The *keys* a
+policy returns are ordinary literal strings you write in your own code in
+every documented pattern here, but `QueryBuilder` doesn't assume that either
+— it validates them the same way, so even a policy that computes a
+condition key dynamically can't turn into an injection point.

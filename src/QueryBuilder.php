@@ -6,9 +6,15 @@ namespace AdaiasMagdiel\PdoRestify;
 
 /**
  * Turns already-validated table/column names and filter tuples into
- * parameterized SQL. Every value is bound, never interpolated; the only
- * strings interpolated into SQL here are identifiers that callers ({@see
- * Resource}, {@see Filters}) have already checked against a whitelist.
+ * parameterized SQL. Every value is bound, never interpolated. Identifiers
+ * (table/column names) *are* interpolated, since SQL has no placeholder
+ * syntax for them — every one that reaches a query string here is first
+ * re-checked with {@see Resource::assertIdentifier()}, regardless of
+ * whether the caller already validated it. This class trusts no caller: a
+ * {@see Resource} policy closure's condition keys, for instance, are
+ * ordinary application code that was never required to whitelist-check
+ * them the way {@see Filters} does for request input — this is the one
+ * place that guarantee is enforced unconditionally.
  *
  * Every method returns an `[sql, params]` tuple ready for
  * `PDO::prepare()`/`PDOStatement::execute()`.
@@ -25,6 +31,8 @@ final class QueryBuilder
      * @param int|null $limit Null omits the LIMIT/OFFSET clause entirely — used internally when
      *                        loading relations, where every matching related row is wanted.
      * @return array{0: string, 1: array<string, mixed>}
+     * @throws \InvalidArgumentException if $table, a column, a filter column, a condition key,
+     *                                    or the order column is not a valid SQL identifier.
      */
     public static function select(
         string $table,
@@ -35,6 +43,11 @@ final class QueryBuilder
         ?int $limit,
         int $offset,
     ): array {
+        self::assertIdentifiers([$table, ...$columns, ...array_keys($conditions), ...array_column($filters, 0)]);
+        if ($order !== null) {
+            self::assertIdentifiers([$order[0]]);
+        }
+
         $select = implode(', ', $columns);
         $sql = "SELECT {$select} FROM {$table}";
 
@@ -59,9 +72,12 @@ final class QueryBuilder
      *
      * @param array<string, mixed> $data Column => value pairs to insert.
      * @return array{0: string, 1: array<string, mixed>}
+     * @throws \InvalidArgumentException if $table or a column of $data is not a valid SQL identifier.
      */
     public static function insert(string $table, array $data): array
     {
+        self::assertIdentifiers([$table, ...array_keys($data)]);
+
         $columns = array_keys($data);
         $placeholders = array_map(static fn (string $c): string => ":i_{$c}", $columns);
 
@@ -81,9 +97,13 @@ final class QueryBuilder
      * @param array<string, mixed> $data Column => value pairs to set.
      * @param array<string, mixed> $conditions Equality conditions scoping which rows are updated.
      * @return array{0: string, 1: array<string, mixed>}
+     * @throws \InvalidArgumentException if $table, a column of $data, or a condition key
+     *                                    is not a valid SQL identifier.
      */
     public static function update(string $table, array $data, array $conditions): array
     {
+        self::assertIdentifiers([$table, ...array_keys($data), ...array_keys($conditions)]);
+
         $sets = [];
         $params = [];
 
@@ -107,9 +127,12 @@ final class QueryBuilder
      *
      * @param array<string, mixed> $conditions Equality conditions scoping which rows are deleted.
      * @return array{0: string, 1: array<string, mixed>}
+     * @throws \InvalidArgumentException if $table or a condition key is not a valid SQL identifier.
      */
     public static function delete(string $table, array $conditions): array
     {
+        self::assertIdentifiers([$table, ...array_keys($conditions)]);
+
         $sql = "DELETE FROM {$table}";
 
         [$where, $params] = self::buildWhere([], $conditions);
@@ -189,5 +212,16 @@ final class QueryBuilder
         }
 
         return [implode(' AND ', $clauses), $params];
+    }
+
+    /**
+     * @param string[] $names
+     * @throws \InvalidArgumentException if any of $names is not a valid, unquoted SQL identifier.
+     */
+    private static function assertIdentifiers(array $names): void
+    {
+        foreach ($names as $name) {
+            Resource::assertIdentifier($name);
+        }
     }
 }

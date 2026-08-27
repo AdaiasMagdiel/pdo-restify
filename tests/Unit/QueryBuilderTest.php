@@ -50,3 +50,23 @@ it('builds a delete query scoped by conditions', function () {
     expect($sql)->toBe('DELETE FROM posts WHERE id = :c0 AND user_id = :c1');
     expect($params)->toBe([':c0' => 1, ':c1' => 2]);
 });
+
+it('rejects an unsafe condition key in select, even though callers are expected to validate first', function () {
+    QueryBuilder::select('posts', ['id'], [], ['id = 1; --' => 1], null, 10, 0);
+})->throws(InvalidArgumentException::class);
+
+it('rejects an unsafe column key in insert data', function () {
+    QueryBuilder::insert('posts', ['title; DROP TABLE posts; --' => 'x']);
+})->throws(InvalidArgumentException::class);
+
+it('rejects an unsafe condition key in update', function () {
+    QueryBuilder::update('posts', ['title' => 'x'], ['1=1; --' => 1]);
+})->throws(InvalidArgumentException::class);
+
+it('rejects an unsafe condition key in delete', function () {
+    QueryBuilder::delete('posts', ['1=1; --' => 1]);
+})->throws(InvalidArgumentException::class);
+
+it('rejects an unsafe table name', function () {
+    QueryBuilder::select('posts; DROP TABLE posts; --', ['id'], [], [], null, 10, 0);
+})->throws(InvalidArgumentException::class);

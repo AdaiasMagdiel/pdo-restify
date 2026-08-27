@@ -261,6 +261,13 @@ final class Api
     /**
      * Handles `PATCH|PUT /{table}/{id}`.
      *
+     * Policy conditions are merged over the request body — same as insert —
+     * so a column the policy uses to scope rows (`user_id`, `tenant_id`, ...)
+     * can never be reassigned by the client just because it also happens to
+     * be in the resource's writable whitelist. Without this, a caller could
+     * update a row they own while changing its ownership/tenant in the same
+     * request, since the WHERE clause only checks the *current* value.
+     *
      * @param array<string, mixed> $body
      * @param array<string, mixed> $context
      * @throws Exceptions\ForbiddenException if `update` has no policy registered.
@@ -269,8 +276,7 @@ final class Api
      */
     private function update(Resource $resource, string $id, array $body, array $context): Response
     {
-        $conditions = ($resource->policyFor(Operation::Update))($context);
-        $conditions[$resource->primaryKey] = $id;
+        $policyConditions = ($resource->policyFor(Operation::Update))($context);
 
         $data = $this->onlyAllowedColumns($resource, $body);
         unset($data[$resource->primaryKey]);
@@ -279,7 +285,12 @@ final class Api
             throw new ValidationException('No data to update');
         }
 
-        [$sql, $params] = QueryBuilder::update($resource->table, $data, $conditions);
+        $data = array_merge($data, $policyConditions);
+
+        $whereConditions = $policyConditions;
+        $whereConditions[$resource->primaryKey] = $id;
+
+        [$sql, $params] = QueryBuilder::update($resource->table, $data, $whereConditions);
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);

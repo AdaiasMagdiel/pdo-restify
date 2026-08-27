@@ -331,9 +331,13 @@ public static function delete(string $table, array $conditions): array
 used internally when loading a relation, where every matching related row is
 wanted.
 
-Every value ends up bound as a parameter; the only strings interpolated
-into the SQL are identifiers the caller has already validated (see
-[Resources & security model](03-resources-and-security.md#identifiers-are-always-validated-values-are-always-bound)).
+Every value ends up bound as a parameter; the only strings interpolated into
+the SQL are identifiers (table name, columns, condition/filter keys, order
+column) — every one of them is re-validated with
+`Resource::assertIdentifier()` before use, regardless of whether the caller
+already checked it. Throws `\InvalidArgumentException` if any isn't a valid
+identifier. See
+[Resources & security model](03-resources-and-security.md#identifiers-are-always-validated-values-are-always-bound).
 
 ---
 
