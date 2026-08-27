@@ -59,6 +59,30 @@ it('still rejects an update with nothing but the primary key', function () {
     expect($response->status)->toBe(422);
 });
 
+it('returns 404, not a misleading 200, when update is denied but select is public', function () {
+    // Found in audit: when select is public but update/delete is owner-scoped,
+    // a denied update ran its WHERE under the update policy (0 rows affected,
+    // uncheckable via rowCount() across drivers) and then re-fetched via
+    // find(), which uses the *select* policy — public, so it always found the
+    // row and returned 200 with the unchanged data instead of 404.
+    $resource = (new Resource('posts'))
+        ->columns(['id', 'title', 'body', 'user_id'])
+        ->allow(Operation::Select) // public — no closure, unrestricted read
+        ->allow(Operation::Update, fn (array $context): array => ['user_id' => $context['user_id']]);
+
+    $api = (new Api($this->pdo))->register($resource);
+
+    $response = $api->handle(
+        new Request('PATCH', '/posts/1', body: ['title' => 'Hijacked']),
+        ['user_id' => 999], // not the owner (post 1 belongs to user_id 1)
+    );
+
+    expect($response->status)->toBe(404);
+
+    $row = $this->pdo->query('SELECT title FROM posts WHERE id = 1')->fetch();
+    expect($row['title'])->toBe('Mine');
+});
+
 it('rejects a table/column/condition identifier that is not a safe SQL identifier', function () {
     // Defense in depth found in audit: QueryBuilder trusted every caller to
     // pre-validate identifiers, but a Resource policy closure's condition

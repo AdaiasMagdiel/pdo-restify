@@ -326,18 +326,39 @@ final class Api
         $whereConditions = $policyConditions;
         $whereConditions[$resource->primaryKey] = $id;
 
+        // Checked against the *update* policy before writing, not $stmt->rowCount()
+        // (driver-dependent: SQLite reports rows matched by WHERE, MySQL/MariaDB
+        // report rows actually changed, so a no-op update masks a 0 either way)
+        // and not by re-fetching afterward under the *select* policy either — if
+        // select is public but update is owner-scoped, a denied update on someone
+        // else's row would otherwise still resolve via find() and come back 200
+        // with the unchanged row instead of 404.
+        if (!$this->exists($resource, $whereConditions)) {
+            throw new NotFoundException("Resource '{$resource->table}' with id '{$id}' not found");
+        }
+
         [$sql, $params] = QueryBuilder::update($resource->table, $data, $whereConditions);
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
 
-        // Deliberately not checking $stmt->rowCount() here: PDO's UPDATE row
-        // count is driver-dependent — SQLite reports rows matched by WHERE,
-        // MySQL/MariaDB report rows actually changed by default, so a no-op
-        // update (new values equal the old ones) reports 0 there even though
-        // the row exists and matched. find() below re-checks existence with
-        // an actual SELECT, which has no such ambiguity on any driver.
         return $this->find($resource, $id, $context);
+    }
+
+    /**
+     * Whether a row matching $conditions exists, independent of any policy —
+     * $conditions is expected to already carry whatever policy scoping applies.
+     *
+     * @param array<string, mixed> $conditions
+     */
+    private function exists(Resource $resource, array $conditions): bool
+    {
+        [$sql, $params] = QueryBuilder::select($resource->table, [$resource->primaryKey], [], $conditions, null, 1, 0);
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+
+        return $stmt->fetch() !== false;
     }
 
     /**
