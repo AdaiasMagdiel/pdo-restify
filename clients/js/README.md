@@ -5,7 +5,7 @@ the PHP library this package lives alongside. It's a thin wrapper around
 `fetch`: it builds the `column=operator.value` query strings and paths
 pdo-restify expects, and normalizes the response into a predictable
 `{ data, error, status }` shape. No dependencies, works in browsers, Node
-18+, and edge runtimes (anywhere with a global `fetch`).
+20+, and edge runtimes (anywhere with a global `fetch`).
 
 > Early, minimal first version, matching the PHP library's own scope — see
 > its [README](../../README.md#roadmap) for what's planned beyond this.
