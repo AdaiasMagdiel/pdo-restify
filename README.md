@@ -124,9 +124,13 @@ including how `AND`/pagination/limits interact, in
 |---------|-----------------|--------------------------------|
 | GET     | `/{table}`       | List rows (filters apply)      |
 | GET     | `/{table}/{id}`  | Fetch a single row              |
-| POST    | `/{table}`       | Insert a row                    |
+| POST    | `/{table}`       | Insert a row, or bulk-insert if the body is a list of objects |
 | PATCH   | `/{table}/{id}`  | Update a row                    |
+| PATCH   | `/{table}`       | Bulk-update rows (each object must include the primary key) |
 | DELETE  | `/{table}/{id}`  | Delete a row                    |
+
+`POST`/`PATCH` bulk requests run in a single transaction — one bad row rolls
+back the whole batch. See [Bulk operations](docs/08-bulk-operations.md).
 
 ## Testing
 
@@ -144,7 +148,7 @@ on GitHub Actions. Those tests skip themselves locally and only run in CI.
 ## Roadmap
 
 - Relationships / embedded resources (joins)
-- Bulk insert/update
+- Bulk delete, and per-row results for partially-failed bulk requests
 - Pluggable authentication helpers
 - RPC-style calls to stored procedures/functions
 

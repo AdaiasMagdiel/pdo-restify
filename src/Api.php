@@ -86,7 +86,7 @@ final class Api
                 'POST' => $this->insert($resource, $request->body, $context),
                 'PATCH', 'PUT' => $id !== null
                     ? $this->update($resource, $id, $request->body, $context)
-                    : throw new BadRequestException('An id is required to update a resource'),
+                    : $this->bulkUpdate($resource, $request->body, $context),
                 'DELETE' => $id !== null
                     ? $this->delete($resource, $id, $context)
                     : throw new BadRequestException('An id is required to delete a resource'),
@@ -152,6 +152,62 @@ final class Api
     /**
      * Handles `POST /{table}`.
      *
+     * A body shaped as a list of objects (`[{...}, {...}]`) is treated as a
+     * bulk insert, delegated to {@see self::bulkInsert()}; anything else is
+     * inserted as a single row.
+     *
+     * @param array<string, mixed> $body
+     * @param array<string, mixed> $context
+     * @throws Exceptions\ForbiddenException if `insert` has no policy registered.
+     * @throws Exceptions\ValidationException if the body is empty, or references an unknown column.
+     */
+    private function insert(Resource $resource, array $body, array $context): Response
+    {
+        if (self::isBulk($body)) {
+            return $this->bulkInsert($resource, $body, $context);
+        }
+
+        return $this->insertOne($resource, $body, $context);
+    }
+
+    /**
+     * Inserts every row in $rows within a single transaction — if any row
+     * fails, none of them are persisted. Returns the created rows, in order.
+     *
+     * @param array<int, array<string, mixed>> $rows
+     * @param array<string, mixed> $context
+     * @return Response Body is a list of the created rows.
+     * @throws Exceptions\ForbiddenException if `insert` has no policy registered.
+     * @throws Exceptions\ValidationException if any row is empty, or references an unknown column.
+     */
+    private function bulkInsert(Resource $resource, array $rows, array $context): Response
+    {
+        $created = [];
+
+        $this->pdo->beginTransaction();
+
+        try {
+            foreach ($rows as $row) {
+                if (!is_array($row)) {
+                    throw new ValidationException('Each row must be an object');
+                }
+
+                $created[] = $this->insertOne($resource, $row, $context)->body;
+            }
+        } catch (\Throwable $e) {
+            $this->pdo->rollBack();
+
+            throw $e;
+        }
+
+        $this->pdo->commit();
+
+        return Response::json($created);
+    }
+
+    /**
+     * Inserts a single row.
+     *
      * Policy conditions are merged over the request body, so they always win
      * over client-submitted values for the same columns.
      *
@@ -160,7 +216,7 @@ final class Api
      * @throws Exceptions\ForbiddenException if `insert` has no policy registered.
      * @throws Exceptions\ValidationException if the body is empty, or references an unknown column.
      */
-    private function insert(Resource $resource, array $body, array $context): Response
+    private function insertOne(Resource $resource, array $body, array $context): Response
     {
         $conditions = ($resource->policyFor('insert'))($context);
         $data = $this->onlyAllowedColumns($resource, $body);
@@ -206,11 +262,59 @@ final class Api
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
 
-        if ($stmt->rowCount() === 0) {
-            throw new NotFoundException("Resource '{$resource->table}' with id '{$id}' not found");
+        // Deliberately not checking $stmt->rowCount() here: PDO's UPDATE row
+        // count is driver-dependent — SQLite reports rows matched by WHERE,
+        // MySQL/MariaDB report rows actually changed by default, so a no-op
+        // update (new values equal the old ones) reports 0 there even though
+        // the row exists and matched. find() below re-checks existence with
+        // an actual SELECT, which has no such ambiguity on any driver.
+        return $this->find($resource, $id, $context);
+    }
+
+    /**
+     * Handles `PATCH|PUT /{table}` with no id — a bulk update. Each row in
+     * the body must include the resource's primary key, identifying which
+     * row it updates; the rest of its keys are the columns to change. Runs
+     * in a single transaction — if any row fails, none of them are applied.
+     *
+     * @param array<string, mixed> $body
+     * @param array<string, mixed> $context
+     * @return Response Body is a list of the updated rows.
+     * @throws Exceptions\BadRequestException if $body isn't a list of row objects.
+     * @throws Exceptions\ForbiddenException if `update` has no policy registered.
+     * @throws Exceptions\ValidationException if a row is missing the primary key,
+     *                                          is empty otherwise, or references an unknown column.
+     * @throws Exceptions\NotFoundException if a row's id has no match under the policy conditions.
+     */
+    private function bulkUpdate(Resource $resource, array $body, array $context): Response
+    {
+        if (!self::isBulk($body)) {
+            throw new BadRequestException(
+                'An id is required to update a resource, or send a list of row objects to update in bulk',
+            );
         }
 
-        return $this->find($resource, $id, $context);
+        $updated = [];
+
+        $this->pdo->beginTransaction();
+
+        try {
+            foreach ($body as $row) {
+                if (!is_array($row) || !array_key_exists($resource->primaryKey, $row)) {
+                    throw new ValidationException("Each row must include '{$resource->primaryKey}'");
+                }
+
+                $updated[] = $this->update($resource, (string) $row[$resource->primaryKey], $row, $context)->body;
+            }
+        } catch (\Throwable $e) {
+            $this->pdo->rollBack();
+
+            throw $e;
+        }
+
+        $this->pdo->commit();
+
+        return Response::json($updated);
     }
 
     /**
@@ -258,5 +362,17 @@ final class Api
         }
 
         return $data;
+    }
+
+    /**
+     * A body is treated as a bulk request when it's a non-empty list
+     * (sequential integer keys from 0) whose first element is itself an
+     * array — i.e. `[{...}, {...}]` rather than a single `{...}` object.
+     *
+     * @param array<string, mixed> $body
+     */
+    private static function isBulk(array $body): bool
+    {
+        return $body !== [] && array_is_list($body) && is_array($body[0]);
     }
 }

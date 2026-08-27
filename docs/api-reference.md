@@ -161,9 +161,13 @@ into an error `Response` (see [Error handling](06-error-handling.md)).
 |---|---|---|
 | `GET` | `/{table}` | List rows, filters/select/order/pagination apply. |
 | `GET` | `/{table}/{id}` | Fetch a single row. |
-| `POST` | `/{table}` | Insert a row. |
+| `POST` | `/{table}` | Insert a row, or bulk-insert if the body is a list of objects. |
 | `PATCH` or `PUT` | `/{table}/{id}` | Update a row. |
+| `PATCH` or `PUT` | `/{table}` | Bulk-update rows; each body object must include the primary key. |
 | `DELETE` | `/{table}/{id}` | Delete a row. |
+
+See [Bulk operations](08-bulk-operations.md) for the bulk insert/update
+request and response shape, and the all-or-nothing transaction semantics.
 
 ---
 

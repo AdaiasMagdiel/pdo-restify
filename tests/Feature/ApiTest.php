@@ -69,6 +69,20 @@ it('refuses to update a row owned by another user', function () {
     expect($response->status)->toBe(404);
 });
 
+it('succeeds updating a row to the value it already has', function () {
+    // Regression guard: PDO's UPDATE rowCount() is driver-dependent (MySQL
+    // reports rows changed, not rows matched — see Api::update()), so this
+    // must not be decided by rowCount(). SQLite alone can't prove the fix;
+    // see the matching test in tests/Integration/CrudTest.php.
+    $response = $this->api->handle(
+        new Request('PATCH', '/posts/1', body: ['title' => 'First']),
+        ['user_id' => 1],
+    );
+
+    expect($response->status)->toBe(200);
+    expect($response->body['title'])->toBe('First');
+});
+
 it('deletes a row scoped to the policy', function () {
     $response = $this->api->handle(new Request('DELETE', '/posts/1'), ['user_id' => 1]);
 

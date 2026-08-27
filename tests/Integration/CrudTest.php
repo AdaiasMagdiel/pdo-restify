@@ -103,6 +103,20 @@ it('refuses to update a row owned by another user', function () {
     expect($response->status)->toBe(404);
 });
 
+it('succeeds updating a row to the value it already has', function () {
+    // MySQL/MariaDB's default PDO rowCount() for UPDATE reports rows
+    // *changed*, not rows *matched* — unlike SQLite. A no-op update (new
+    // value equals the current one) reports 0 there. This is the test that
+    // actually exercises that driver difference; see Api::update().
+    $response = $this->api->handle(
+        new Request('PATCH', '/posts/1', body: ['title' => 'First']),
+        ['user_id' => 1],
+    );
+
+    expect($response->status)->toBe(200);
+    expect($response->body['title'])->toBe('First');
+});
+
 it('deletes a row scoped to the policy', function () {
     $response = $this->api->handle(new Request('DELETE', '/posts/1'), ['user_id' => 1]);
 
@@ -110,4 +124,49 @@ it('deletes a row scoped to the policy', function () {
 
     $count = $this->pdo->query('SELECT COUNT(*) FROM posts')->fetchColumn();
     expect((int) $count)->toBe(2);
+});
+
+it('bulk inserts every row within a transaction', function () {
+    $response = $this->api->handle(
+        new Request('POST', '/posts', body: [
+            ['title' => 'A', 'body' => 'Body A', 'user_id' => 999],
+            ['title' => 'B', 'body' => 'Body B', 'user_id' => 999],
+        ]),
+        ['user_id' => 1],
+    );
+
+    expect($response->status)->toBe(200);
+    expect($response->body)->toHaveCount(2);
+    expect($response->body[0]['user_id'])->toBe(1);
+
+    $count = $this->pdo->query('SELECT COUNT(*) FROM posts')->fetchColumn();
+    expect((int) $count)->toBe(5);
+});
+
+it('rolls back the entire bulk insert if any row is invalid', function () {
+    $response = $this->api->handle(
+        new Request('POST', '/posts', body: [
+            ['title' => 'A', 'body' => 'Body A', 'user_id' => 1],
+            ['title' => 'B', 'body' => 'Body B', 'is_admin' => 1],
+        ]),
+        ['user_id' => 1],
+    );
+
+    expect($response->status)->toBe(422);
+
+    $count = $this->pdo->query('SELECT COUNT(*) FROM posts')->fetchColumn();
+    expect((int) $count)->toBe(3);
+});
+
+it('bulk updates every row identified by its primary key', function () {
+    $response = $this->api->handle(
+        new Request('PATCH', '/posts', body: [
+            ['id' => 1, 'title' => 'First updated'],
+            ['id' => 2, 'title' => 'Second updated'],
+        ]),
+        ['user_id' => 1],
+    );
+
+    expect($response->status)->toBe(200);
+    expect($response->body)->toHaveCount(2);
 });

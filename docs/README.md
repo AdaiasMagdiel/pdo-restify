@@ -7,6 +7,7 @@
 - [Integrating with a framework](05-integrating-with-frameworks.md) — bridging `Api::handle()` into Slim, Laravel, CakePHP, Erlenmeyer or a plain script.
 - [Error handling](06-error-handling.md) — exceptions, their HTTP status codes, and the response shape.
 - [Tips & gotchas](07-tips-and-gotchas.md) — things that will bite you if you don't know them going in.
+- [Bulk operations](08-bulk-operations.md) — inserting/updating many rows in one request, and how the all-or-nothing transaction works.
 - [API reference](api-reference.md) — every public class and method, in one page.
 
 If something here is unclear or missing, that's a documentation bug — please open an issue.
