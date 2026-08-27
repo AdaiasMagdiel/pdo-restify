@@ -11,31 +11,6 @@ or a plain script.
 > Early, minimal first version. The scope is intentionally small — see
 > [Roadmap](#roadmap).
 
-## Why
-
-PostgreSQL has Row-Level Security to scope what each request can see or change.
-PDO has nothing like that built in, and pdo-restify doesn't try to fake it either
-— it gives you the pieces and leaves the decision to you:
-
-- **Deny by default, at the table level.** A table is only reachable if you
-  explicitly register it as a `Resource` with an explicit column whitelist, and
-  each operation (`select`, `insert`, `update`, `delete`) must be explicitly
-  enabled with `allow()`. Anything you don't register stays unreachable.
-- **Row-level scoping is optional, not imposed.** `allow()` takes an optional
-  policy closure that returns conditions always enforced for that operation
-  (and those values override whatever the client sent) — this is how you
-  emulate RLS on top of PDO, scoping rows to e.g. the authenticated user.
-  Call `allow('select')` with no closure and that operation is wide open, no
-  scoping at all. pdo-restify won't force a security architecture on you: some
-  APIs genuinely don't need per-row scoping (public read-only data, an admin
-  tool behind its own auth layer, a single-tenant app), and bolting on a
-  no-op policy for those cases would just be ceremony. The trade-off is
-  yours to make, deliberately — just know that skipping a policy means every
-  caller sees every row for that operation.
-- **Every query is parameterized.** Table, column and operator names are
-  validated against a whitelist before they ever reach a SQL string; values are
-  always bound as parameters, never interpolated.
-
 ## Install
 
 ```bash
@@ -91,6 +66,30 @@ app (or a thin bridge, see [`examples/erlenmeyer-bridge.php`](examples/erlenmeye
 is responsible for turning the real HTTP request into a `Request` and writing
 the resulting `Response` back out. This is what makes pdo-restify pluggable
 into any router or framework.
+
+## Security model
+
+PostgreSQL has Row-Level Security to scope what each request can see or
+change. PDO has nothing like that built in, and pdo-restify doesn't try to
+fake it either — it gives you the pieces and leaves the decision to you:
+
+- **Deny by default, at the table level.** A table is only reachable if
+  registered as a `Resource` with an explicit column whitelist, and each
+  operation (`select`, `insert`, `update`, `delete`) must be explicitly
+  enabled with `allow()`. Anything you don't register stays unreachable.
+- **Row-level scoping is optional, not imposed.** The policy closure passed
+  to `allow()` returns conditions that are always enforced for that
+  operation, overriding whatever the client sent — this is how you emulate
+  RLS on top of PDO, e.g. scoping rows to the authenticated user. Skip the
+  closure (`$posts->allow('select')`) and that operation is wide open, no
+  scoping at all. Some APIs genuinely don't need per-row scoping (public
+  read-only data, an admin tool behind its own auth layer, a single-tenant
+  app), and pdo-restify won't force a no-op policy on you just for ceremony
+  — but skipping one does mean every caller sees every row for that
+  operation, so make that trade-off deliberately.
+- **Every query is parameterized.** Table, column and operator names are
+  validated against a whitelist before they ever reach a SQL string; values
+  are always bound as parameters, never interpolated.
 
 ## Query string
 
