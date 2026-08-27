@@ -11,6 +11,11 @@ or a plain script.
 > Early, minimal first version. The scope is intentionally small — see
 > [Roadmap](#roadmap).
 
+📚 **[Full documentation](docs/README.md)** — guides for connections,
+resources & the security model, querying, framework integration, error
+handling, tips, and a complete API reference. The sections below are a
+quick overview; the docs go deeper on every one of them.
+
 ## Install
 
 ```bash
@@ -91,6 +96,9 @@ fake it either — it gives you the pieces and leaves the decision to you:
   validated against a whitelist before they ever reach a SQL string; values
   are always bound as parameters, never interpolated.
 
+See [Resources & security model](docs/03-resources-and-security.md) for the
+full guide, with multi-tenant and role-based policy examples.
+
 ## Query string
 
 | Param             | Example                     | Meaning                                   |
@@ -101,7 +109,9 @@ fake it either — it gives you the pieces and leaves the decision to you:
 | `limit` / `offset`  | `limit=20&offset=40`          | Pagination, `limit` is capped server-side   |
 
 Supported filter operators: `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `like`
-(`*` is the wildcard), `in` (comma-separated values).
+(`*` is the wildcard), `in` (comma-separated values). Full details,
+including how `AND`/pagination/limits interact, in
+[Querying](docs/04-querying.md).
 
 ## Routes
 
