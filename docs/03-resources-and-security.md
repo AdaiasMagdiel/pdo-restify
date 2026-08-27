@@ -30,11 +30,11 @@ also not enough on its own: see the next section.
 
 ## Operations are opt-in too
 
-Registering a resource exposes nothing by itself. Each CRUD operation —
-`select`, `insert`, `update`, `delete` — must be turned on explicitly:
+Registering a resource exposes nothing by itself. Each `Operation` case —
+`Select`, `Insert`, `Update`, `Delete` — must be turned on explicitly:
 
 ```php
-$posts->allow('select', $somePolicy);
+$posts->allow(Operation::Select, $somePolicy);
 ```
 
 Calling `handle()` for an operation that was never `allow()`'d returns
@@ -53,7 +53,7 @@ client sent.
 ```php
 $scopedToCurrentUser = fn (array $context): array => ['user_id' => $context['user_id']];
 
-$posts->allow('select', $scopedToCurrentUser);
+$posts->allow(Operation::Select, $scopedToCurrentUser);
 ```
 
 What this buys you, concretely:
@@ -98,10 +98,10 @@ $adminOnly = function (array $context): array {
 };
 
 $posts
-    ->allow('select')                // no closure — public, unrestricted read
-    ->allow('insert', $adminOnly)
-    ->allow('update', $adminOnly)
-    ->allow('delete', $adminOnly);
+    ->allow(Operation::Select)                // no closure — public, unrestricted read
+    ->allow(Operation::Insert, $adminOnly)
+    ->allow(Operation::Update, $adminOnly)
+    ->allow(Operation::Delete, $adminOnly);
 ```
 
 `GET /posts` and `GET /posts/{id}` work for anyone, with no `$context`
@@ -125,8 +125,8 @@ resource rather than uniformly across all four.
 ```php
 $scopedToTenant = fn (array $context): array => ['tenant_id' => $context['tenant_id']];
 
-$orders->allow('select', $scopedToTenant);
-$orders->allow('insert', $scopedToTenant);
+$orders->allow(Operation::Select, $scopedToTenant);
+$orders->allow(Operation::Insert, $scopedToTenant);
 ```
 
 ### Role-based example
@@ -143,7 +143,7 @@ $scopedByRole = function (array $context): array {
     return ['owner_id' => $context['user_id']];
 };
 
-$documents->allow('select', $scopedByRole);
+$documents->allow(Operation::Select, $scopedByRole);
 ```
 
 Since a policy is a plain closure, it can throw too — throwing
@@ -161,7 +161,7 @@ $adminOnly = function (array $context): array {
     return [];
 };
 
-$auditLog->allow('select', $adminOnly);
+$auditLog->allow(Operation::Select, $adminOnly);
 ```
 
 ## Skipping a policy on purpose
@@ -170,7 +170,7 @@ A policy is **optional**, not implied. Call `allow()` with no second
 argument and that operation is enabled with zero row-level restriction:
 
 ```php
-$posts->allow('select'); // every caller sees every row, for this operation
+$posts->allow(Operation::Select); // every caller sees every row, for this operation
 ```
 
 pdo-restify won't force a scoping scheme on you. Plenty of real APIs don't

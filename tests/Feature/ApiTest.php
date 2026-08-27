@@ -2,6 +2,7 @@
 
 use AdaiasMagdiel\PdoRestify\Api;
 use AdaiasMagdiel\PdoRestify\Http\Request;
+use AdaiasMagdiel\PdoRestify\Operation;
 use AdaiasMagdiel\PdoRestify\Resource;
 
 beforeEach(function () {
@@ -106,7 +107,7 @@ it('rejects an insert with an empty body', function () {
     // a user_id condition into the insert, so $data would never be empty.
     $resource = (new Resource('posts'))
         ->columns(['id', 'title', 'body', 'user_id'])
-        ->allow('insert');
+        ->allow(Operation::Insert);
 
     $api = (new Api($this->pdo))->register($resource);
 
@@ -154,7 +155,7 @@ it('returns 404 for unregistered resources', function () {
 it('exposes every row when a resource opts out of row-level scoping', function () {
     $resource = (new Resource('posts'))
         ->columns(['id', 'title', 'body', 'user_id'])
-        ->allow('select');
+        ->allow(Operation::Select);
 
     $api = (new Api($this->pdo))->register($resource);
 

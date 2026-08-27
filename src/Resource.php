@@ -16,13 +16,10 @@ use AdaiasMagdiel\PdoRestify\Exceptions\ForbiddenException;
  */
 final class Resource
 {
-    /** @var string[] CRUD operations a resource can enable. */
-    private const OPERATIONS = ['select', 'insert', 'update', 'delete'];
-
     /** @var string[] Columns readable/writable through this resource; empty means none. */
     private array $columns = [];
 
-    /** @var array<string, \Closure> Policy closures registered via {@see self::allow()}, keyed by operation. */
+    /** @var array<string, \Closure> Policy closures registered via {@see self::allow()}, keyed by {@see Operation::value}. */
     private array $policies = [];
 
     /**
@@ -71,34 +68,27 @@ final class Resource
      * column => value conditions that are always enforced, regardless of
      * client input — this is how you scope rows like PostgreSQL's RLS would.
      *
-     * A policy is not required: call allow('select') with no closure to
-     * expose an operation with no row-level restriction at all. Nothing in
+     * A policy is not required: call allow(Operation::Select) with no closure
+     * to expose an operation with no row-level restriction at all. Nothing in
      * pdo-restify forces you into a scoping scheme — that choice is yours.
      *
-     * @param string $operation One of `select`, `insert`, `update`, `delete`.
      * @param (\Closure(array<string, mixed>): array<string, mixed>)|null $policy
-     * @throws \InvalidArgumentException if $operation is not a known CRUD operation.
      */
-    public function allow(string $operation, ?\Closure $policy = null): static
+    public function allow(Operation $operation, ?\Closure $policy = null): static
     {
-        if (!in_array($operation, self::OPERATIONS, true)) {
-            throw new \InvalidArgumentException("Unknown operation: {$operation}");
-        }
-
-        $this->policies[$operation] = $policy ?? static fn (array $context = []): array => [];
+        $this->policies[$operation->value] = $policy ?? static fn (array $context = []): array => [];
 
         return $this;
     }
 
     /**
-     * @param string $operation One of `select`, `insert`, `update`, `delete`.
      * @return \Closure(array<string, mixed>): array<string, mixed>
      * @throws ForbiddenException if $operation was never enabled via {@see self::allow()}.
      */
-    public function policyFor(string $operation): \Closure
+    public function policyFor(Operation $operation): \Closure
     {
-        return $this->policies[$operation]
-            ?? throw new ForbiddenException("Operation '{$operation}' is not allowed on '{$this->table}'");
+        return $this->policies[$operation->value]
+            ?? throw new ForbiddenException("Operation '{$operation->value}' is not allowed on '{$this->table}'");
     }
 
     /**

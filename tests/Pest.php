@@ -1,6 +1,7 @@
 <?php
 
 use AdaiasMagdiel\PdoRestify\Api;
+use AdaiasMagdiel\PdoRestify\Operation;
 use AdaiasMagdiel\PdoRestify\Resource;
 
 uses(Tests\TestCase::class)->in('Unit', 'Feature', 'Integration');
@@ -40,10 +41,10 @@ function ownedPostsApi(PDO $pdo): Api
     $scopedToUser = fn (array $context): array => ['user_id' => $context['user_id']];
 
     $resource
-        ->allow('select', $scopedToUser)
-        ->allow('insert', $scopedToUser)
-        ->allow('update', $scopedToUser)
-        ->allow('delete', $scopedToUser);
+        ->allow(Operation::Select, $scopedToUser)
+        ->allow(Operation::Insert, $scopedToUser)
+        ->allow(Operation::Update, $scopedToUser)
+        ->allow(Operation::Delete, $scopedToUser);
 
     return (new Api($pdo))->register($resource);
 }

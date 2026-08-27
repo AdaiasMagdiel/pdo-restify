@@ -6,6 +6,7 @@ further detail (every method also carries a PHPDoc block).
 
 - [`Connection`](#connection)
 - [`Resource`](#resource)
+- [`Operation`](#operation)
 - [`Api`](#api)
 - [`Filters`](#filters)
 - [`QueryBuilder`](#querybuilder)
@@ -86,20 +87,18 @@ Returns the whitelist set by `columns()` (empty array if never called).
 ### `allow()`
 
 ```php
-public function allow(string $operation, ?\Closure $policy = null): static
+public function allow(Operation $operation, ?\Closure $policy = null): static
 ```
 
-Enables `$operation` (one of `'select'`, `'insert'`, `'update'`,
-`'delete'`), optionally scoped by `$policy`. `$policy` has the signature
-`function (array $context): array` and returns conditions always enforced
-for that operation. Passing no `$policy` enables the operation with no
-scoping at all. Throws `\InvalidArgumentException` if `$operation` isn't one
-of the four known operations. Returns `$this` for chaining.
+Enables `$operation`, optionally scoped by `$policy`. `$policy` has the
+signature `function (array $context): array` and returns conditions always
+enforced for that operation. Passing no `$policy` enables the operation with
+no scoping at all. Returns `$this` for chaining.
 
 ### `policyFor()`
 
 ```php
-public function policyFor(string $operation): \Closure
+public function policyFor(Operation $operation): \Closure
 ```
 
 Returns the closure registered via `allow()` for `$operation`. Throws
@@ -116,6 +115,26 @@ The identifier-validation primitive used throughout the library (table
 names, column names). Throws `\InvalidArgumentException` if `$name` isn't a
 valid, unquoted SQL identifier. Exposed publicly in case you need the same
 guarantee elsewhere in your app.
+
+---
+
+## `Operation`
+
+```php
+enum Operation: string
+{
+    case Select = 'select';
+    case Insert = 'insert';
+    case Update = 'update';
+    case Delete = 'delete';
+}
+```
+
+A string-backed enum of the four CRUD operations a `Resource` can expose.
+Used as the first argument to `Resource::allow()`/`policyFor()`; passing
+anything else there is a `TypeError`, not a runtime validation failure —
+invalid operations are caught by the language itself, not by pdo-restify's
+own code.
 
 ---
 

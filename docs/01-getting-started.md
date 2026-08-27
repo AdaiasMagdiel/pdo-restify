@@ -17,10 +17,10 @@ Every pdo-restify setup is the same four steps, in this order:
    your application already has.
 2. **Describe a `Resource`.** A resource wraps one database table: which
    columns are exposed, and what its primary key column is called.
-3. **Enable operations with policies.** Call `->allow()` for each of
-   `select`, `insert`, `update`, `delete` you want to expose, each with a
-   closure that scopes which rows the caller can touch (or no closure, if you
-   want that operation wide open — see
+3. **Enable operations with policies.** Call `->allow()` for each
+   `Operation` case (`Select`, `Insert`, `Update`, `Delete`) you want to
+   expose, each with a closure that scopes which rows the caller can touch
+   (or no closure, if you want that operation wide open — see
    [Resources & security model](03-resources-and-security.md)).
 4. **Register the resource on an `Api` and call `handle()`.** `Api::handle()`
    takes a `Request` and a context array, and returns a `Response` — plain
@@ -32,6 +32,7 @@ Every pdo-restify setup is the same four steps, in this order:
 use AdaiasMagdiel\PdoRestify\Api;
 use AdaiasMagdiel\PdoRestify\Connection;
 use AdaiasMagdiel\PdoRestify\Http\Request;
+use AdaiasMagdiel\PdoRestify\Operation;
 use AdaiasMagdiel\PdoRestify\Resource;
 
 // 1. Connection
@@ -45,10 +46,10 @@ $posts = (new Resource('posts'))
 $scopedToCurrentUser = fn (array $context): array => ['user_id' => $context['user_id']];
 
 $posts
-    ->allow('select', $scopedToCurrentUser)
-    ->allow('insert', $scopedToCurrentUser)
-    ->allow('update', $scopedToCurrentUser)
-    ->allow('delete', $scopedToCurrentUser);
+    ->allow(Operation::Select, $scopedToCurrentUser)
+    ->allow(Operation::Insert, $scopedToCurrentUser)
+    ->allow(Operation::Update, $scopedToCurrentUser)
+    ->allow(Operation::Delete, $scopedToCurrentUser);
 
 // 4. Api
 $api = (new Api($pdo))->register($posts);

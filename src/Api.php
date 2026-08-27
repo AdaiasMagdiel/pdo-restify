@@ -107,7 +107,7 @@ final class Api
      */
     private function list(Resource $resource, array $query, array $context): Response
     {
-        $conditions = ($resource->policyFor('select'))($context);
+        $conditions = ($resource->policyFor(Operation::Select))($context);
         $allowed = $resource->allowedColumns();
 
         $columns = Filters::select($query['select'] ?? null, $allowed);
@@ -133,7 +133,7 @@ final class Api
      */
     private function find(Resource $resource, string $id, array $context): Response
     {
-        $conditions = ($resource->policyFor('select'))($context);
+        $conditions = ($resource->policyFor(Operation::Select))($context);
         $conditions[$resource->primaryKey] = $id;
 
         [$sql, $params] = QueryBuilder::select($resource->table, $resource->allowedColumns(), [], $conditions, null, 1, 0);
@@ -218,7 +218,7 @@ final class Api
      */
     private function insertOne(Resource $resource, array $body, array $context): Response
     {
-        $conditions = ($resource->policyFor('insert'))($context);
+        $conditions = ($resource->policyFor(Operation::Insert))($context);
         $data = $this->onlyAllowedColumns($resource, $body);
         $data = array_merge($data, $conditions);
 
@@ -247,7 +247,7 @@ final class Api
      */
     private function update(Resource $resource, string $id, array $body, array $context): Response
     {
-        $conditions = ($resource->policyFor('update'))($context);
+        $conditions = ($resource->policyFor(Operation::Update))($context);
         $conditions[$resource->primaryKey] = $id;
 
         $data = $this->onlyAllowedColumns($resource, $body);
@@ -326,7 +326,7 @@ final class Api
      */
     private function delete(Resource $resource, string $id, array $context): Response
     {
-        $conditions = ($resource->policyFor('delete'))($context);
+        $conditions = ($resource->policyFor(Operation::Delete))($context);
         $conditions[$resource->primaryKey] = $id;
 
         [$sql, $params] = QueryBuilder::delete($resource->table, $conditions);

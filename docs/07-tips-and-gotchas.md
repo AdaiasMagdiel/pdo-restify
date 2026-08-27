@@ -33,8 +33,8 @@ build a resource conditionally and forget one branch.
 
 `GET /{table}/{id}` reuses the `select` policy, not a separate one — there's
 no way to allow listing but forbid fetching-by-id, or vice versa. If you only
-call `allow('select', ...)`, both `GET /{table}` and `GET /{table}/{id}` use
-that same policy.
+call `allow(Operation::Select, ...)`, both `GET /{table}` and
+`GET /{table}/{id}` use that same policy.
 
 ## Insert returns the row insert actually wrote, not what the client sent
 

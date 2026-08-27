@@ -2,6 +2,7 @@
 
 use AdaiasMagdiel\PdoRestify\Api;
 use AdaiasMagdiel\PdoRestify\Http\Request;
+use AdaiasMagdiel\PdoRestify\Operation;
 use AdaiasMagdiel\PdoRestify\Resource;
 
 beforeEach(function () {
@@ -12,14 +13,14 @@ beforeEach(function () {
 
     $resource = (new Resource('posts'))
         ->columns(['id', 'title', 'body', 'user_id'])
-        ->allow('select');
+        ->allow(Operation::Select);
 
     $this->api = (new Api($this->pdo))->register($resource);
 
     // A separate, tightly-capped Api makes limit-clamping observable with only 3 rows.
     $clampedResource = (new Resource('posts'))
         ->columns(['id', 'title', 'body', 'user_id'])
-        ->allow('select');
+        ->allow(Operation::Select);
 
     $this->clampedApi = (new Api($this->pdo, maxLimit: 2))->register($clampedResource);
 });

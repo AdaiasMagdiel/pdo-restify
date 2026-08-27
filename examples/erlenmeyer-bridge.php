@@ -10,6 +10,7 @@ use AdaiasMagdiel\Erlenmeyer\Response as ErlenmeyerResponse;
 use AdaiasMagdiel\PdoRestify\Api;
 use AdaiasMagdiel\PdoRestify\Connection;
 use AdaiasMagdiel\PdoRestify\Http\Request;
+use AdaiasMagdiel\PdoRestify\Operation;
 use AdaiasMagdiel\PdoRestify\Resource;
 
 $pdo = Connection::make('sqlite', __DIR__ . '/database.sqlite');
@@ -20,10 +21,10 @@ $posts = (new Resource('posts'))
 $scopedToCurrentUser = fn (array $context): array => ['user_id' => $context['user_id']];
 
 $posts
-    ->allow('select', $scopedToCurrentUser)
-    ->allow('insert', $scopedToCurrentUser)
-    ->allow('update', $scopedToCurrentUser)
-    ->allow('delete', $scopedToCurrentUser);
+    ->allow(Operation::Select, $scopedToCurrentUser)
+    ->allow(Operation::Insert, $scopedToCurrentUser)
+    ->allow(Operation::Update, $scopedToCurrentUser)
+    ->allow(Operation::Delete, $scopedToCurrentUser);
 
 $api = (new Api($pdo))->register($posts);
 

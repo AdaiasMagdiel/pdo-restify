@@ -31,6 +31,7 @@ composer require adaiasmagdiel/pdo-restify
 use AdaiasMagdiel\PdoRestify\Api;
 use AdaiasMagdiel\PdoRestify\Connection;
 use AdaiasMagdiel\PdoRestify\Http\Request;
+use AdaiasMagdiel\PdoRestify\Operation;
 use AdaiasMagdiel\PdoRestify\Resource;
 
 // Either let pdo-restify build the PDO instance for you...
@@ -46,16 +47,16 @@ $posts = (new Resource('posts'))
 $scopedToCurrentUser = fn (array $context): array => ['user_id' => $context['user_id']];
 
 $posts
-    ->allow('select', $scopedToCurrentUser)
-    ->allow('insert', $scopedToCurrentUser)
-    ->allow('update', $scopedToCurrentUser)
-    ->allow('delete', $scopedToCurrentUser);
+    ->allow(Operation::Select, $scopedToCurrentUser)
+    ->allow(Operation::Insert, $scopedToCurrentUser)
+    ->allow(Operation::Update, $scopedToCurrentUser)
+    ->allow(Operation::Delete, $scopedToCurrentUser);
 
 $api = (new Api($pdo))->register($posts);
 
 // No scoping needed for this operation? Skip the closure entirely and the
 // resource stays wide open for it:
-// $posts->allow('select');
+// $posts->allow(Operation::Select);
 
 $request = new Request(
     method: 'GET',
@@ -83,14 +84,15 @@ fake it either — it gives you the pieces and leaves the decision to you:
 
 - **Deny by default, at the table level.** A table is only reachable if
   registered as a `Resource` with an explicit column whitelist, and each
-  operation (`select`, `insert`, `update`, `delete`) must be explicitly
-  enabled with `allow()`. Anything you don't register stays unreachable.
+  operation (`Operation::Select`, `Insert`, `Update`, `Delete`) must be
+  explicitly enabled with `allow()`. Anything you don't register stays
+  unreachable.
 - **Row-level scoping is optional, not imposed.** The policy closure passed
   to `allow()` returns conditions that are always enforced for that
   operation, overriding whatever the client sent — this is how you emulate
   RLS on top of PDO, e.g. scoping rows to the authenticated user. Skip the
-  closure (`$posts->allow('select')`) and that operation is wide open, no
-  scoping at all. Some APIs genuinely don't need per-row scoping (public
+  closure (`$posts->allow(Operation::Select)`) and that operation is wide
+  open, no scoping at all. Some APIs genuinely don't need per-row scoping (public
   read-only data, an admin tool behind its own auth layer, a single-tenant
   app), and pdo-restify won't force a no-op policy on you just for ceremony
   — but skipping one does mean every caller sees every row for that
