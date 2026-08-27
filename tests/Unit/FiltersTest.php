@@ -31,9 +31,33 @@ it('rejects filters without an operator', function () {
 })->throws(ValidationException::class);
 
 it('parses a valid order clause', function () {
-    expect(Filters::order('title.desc', ['title']))->toBe(['title', 'desc']);
-    expect(Filters::order('title', ['title']))->toBe(['title', 'asc']);
+    expect(Filters::order('title.desc', ['title']))->toBe([['title', 'desc']]);
+    expect(Filters::order('title', ['title']))->toBe([['title', 'asc']]);
     expect(Filters::order(null, ['title']))->toBeNull();
+});
+
+it('parses a multi-column order clause', function () {
+    $result = Filters::order('created_at.desc,title.asc', ['created_at', 'title']);
+
+    expect($result)->toBe([['created_at', 'desc'], ['title', 'asc']]);
+});
+
+it('parses is_null as a no-value operator', function () {
+    $filters = Filters::parse(['subtitle' => 'is_null'], ['subtitle']);
+
+    expect($filters)->toBe([['subtitle', 'is_null', '']]);
+});
+
+it('parses is_not_null as a no-value operator', function () {
+    $filters = Filters::parse(['subtitle' => 'is_not_null'], ['subtitle']);
+
+    expect($filters)->toBe([['subtitle', 'is_not_null', '']]);
+});
+
+it('parses not_in as a regular operator with a value', function () {
+    $filters = Filters::parse(['id' => 'not_in.1,2,3'], ['id']);
+
+    expect($filters)->toBe([['id', 'not_in', '1,2,3']]);
 });
 
 it('rejects an order column outside the whitelist', function () {

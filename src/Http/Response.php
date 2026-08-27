@@ -27,9 +27,11 @@ final class Response
 
     /**
      * Shorthand for the common case: a JSON body with the default headers.
+     *
+     * @param array<string, string> $extraHeaders Merged on top of the default Content-Type header.
      */
-    public static function json(mixed $body, int $status = 200): self
+    public static function json(mixed $body, int $status = 200, array $extraHeaders = []): self
     {
-        return new self($status, $body);
+        return new self($status, $body, ['Content-Type' => 'application/json'] + $extraHeaders);
     }
 }

@@ -16,14 +16,14 @@ use PDO;
 final class Connection
 {
     /** @var string[] Drivers this library is tested against and willing to configure. */
-    private const DRIVERS = ['mysql', 'mariadb', 'sqlite'];
+    private const DRIVERS = ['mysql', 'mariadb', 'sqlite', 'pgsql'];
 
     /**
      * Builds a PDO instance with sane defaults (exception error mode,
      * associative fetch, real prepared statements).
      *
-     * @param string $driver One of `mysql`, `mariadb`, `sqlite`.
-     * @param string $database Database name for mysql/mariadb, or the file path
+     * @param string $driver One of `mysql`, `mariadb`, `sqlite`, `pgsql`.
+     * @param string $database Database name for mysql/mariadb/pgsql, or the file path
      *                         (or `:memory:`) for sqlite.
      * @param array<int, mixed> $options Extra PDO driver options, merged under the
      *                                    library's defaults so they can still be overridden.
@@ -48,6 +48,12 @@ final class Connection
                 'mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4',
                 $host ?? '127.0.0.1',
                 $port ?? 3306,
+                $database,
+            ),
+            'pgsql' => sprintf(
+                'pgsql:host=%s;port=%d;dbname=%s',
+                $host ?? '127.0.0.1',
+                $port ?? 5432,
                 $database,
             ),
         };

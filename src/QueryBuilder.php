@@ -27,12 +27,12 @@ final class QueryBuilder
      * @param string[] $columns
      * @param array<int, array{0: string, 1: string, 2: string}> $filters Tuples of [column, operator, rawValue], as returned by {@see Filters::parse()}.
      * @param array<string, mixed> $conditions Equality conditions (e.g. from a {@see Resource} policy), ANDed with $filters.
-     * @param array{0: string, 1: string}|null $order [column, direction] as returned by {@see Filters::order()}.
+     * @param list<array{0: string, 1: string}>|null $order List of [column, direction] pairs as returned by {@see Filters::order()}.
      * @param int|null $limit Null omits the LIMIT/OFFSET clause entirely — used internally when
      *                        loading relations, where every matching related row is wanted.
      * @return array{0: string, 1: array<string, mixed>}
      * @throws \InvalidArgumentException if $table, a column, a filter column, a condition key,
-     *                                    or the order column is not a valid SQL identifier.
+     *                                    or an order column is not a valid SQL identifier.
      */
     public static function select(
         string $table,
@@ -45,7 +45,7 @@ final class QueryBuilder
     ): array {
         self::assertIdentifiers([$table, ...$columns, ...array_keys($conditions), ...array_column($filters, 0)]);
         if ($order !== null) {
-            self::assertIdentifiers([$order[0]]);
+            self::assertIdentifiers(array_column($order, 0));
         }
 
         $select = implode(', ', $columns);
@@ -57,11 +57,39 @@ final class QueryBuilder
         }
 
         if ($order !== null) {
-            $sql .= " ORDER BY {$order[0]} " . strtoupper($order[1]);
+            $orderClauses = array_map(
+                static fn (array $o): string => "{$o[0]} " . strtoupper($o[1]),
+                $order,
+            );
+            $sql .= ' ORDER BY ' . implode(', ', $orderClauses);
         }
 
         if ($limit !== null) {
             $sql .= " LIMIT {$limit} OFFSET {$offset}";
+        }
+
+        return [$sql, $params];
+    }
+
+    /**
+     * Builds a `SELECT COUNT(*) AS total FROM table WHERE ...` query, using the
+     * same filters and conditions as {@see self::select()} so callers can get an
+     * accurate total count for pagination without fetching all rows.
+     *
+     * @param array<int, array{0: string, 1: string, 2: string}> $filters
+     * @param array<string, mixed> $conditions
+     * @return array{0: string, 1: array<string, mixed>}
+     * @throws \InvalidArgumentException if $table, a filter column, or a condition key is not a valid SQL identifier.
+     */
+    public static function count(string $table, array $filters, array $conditions): array
+    {
+        self::assertIdentifiers([$table, ...array_keys($conditions), ...array_column($filters, 0)]);
+
+        $sql = "SELECT COUNT(*) AS total FROM {$table}";
+
+        [$where, $params] = self::buildWhere($filters, $conditions);
+        if ($where !== '') {
+            $sql .= " WHERE {$where}";
         }
 
         return [$sql, $params];
@@ -205,6 +233,22 @@ final class QueryBuilder
                         $params[$inPh] = $v;
                     }
                     $clauses[] = "{$column} IN (" . implode(', ', $names) . ')';
+                    break;
+                case 'not_in':
+                    $values = explode(',', $value);
+                    $names = [];
+                    foreach ($values as $j => $v) {
+                        $inPh = "{$ph}_{$j}";
+                        $names[] = $inPh;
+                        $params[$inPh] = $v;
+                    }
+                    $clauses[] = "{$column} NOT IN (" . implode(', ', $names) . ')';
+                    break;
+                case 'is_null':
+                    $clauses[] = "{$column} IS NULL";
+                    break;
+                case 'is_not_null':
+                    $clauses[] = "{$column} IS NOT NULL";
                     break;
             }
 

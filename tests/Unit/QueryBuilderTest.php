@@ -8,13 +8,47 @@ it('builds a select query with filters, conditions and pagination', function () 
         ['id', 'title'],
         [['title', 'like', '*hello*']],
         ['user_id' => 1],
-        ['id', 'desc'],
+        [['id', 'desc']],
         10,
         5,
     );
 
     expect($sql)->toBe('SELECT id, title FROM posts WHERE user_id = :c0 AND title LIKE :f1 ORDER BY id DESC LIMIT 10 OFFSET 5');
     expect($params)->toBe([':c0' => 1, ':f1' => '%hello%']);
+});
+
+it('builds a select query with multi-column order', function () {
+    [$sql] = QueryBuilder::select('posts', ['id', 'title'], [], [], [['created_at', 'desc'], ['title', 'asc']], null, 0);
+
+    expect($sql)->toBe('SELECT id, title FROM posts ORDER BY created_at DESC, title ASC');
+});
+
+it('builds a count query with filters and conditions', function () {
+    [$sql, $params] = QueryBuilder::count('posts', [['user_id', 'eq', '1']], ['tenant_id' => 5]);
+
+    expect($sql)->toBe('SELECT COUNT(*) AS total FROM posts WHERE tenant_id = :c0 AND user_id = :f1');
+    expect($params)->toBe([':c0' => 5, ':f1' => '1']);
+});
+
+it('builds a not_in clause', function () {
+    [$sql, $params] = QueryBuilder::select('posts', ['id'], [['id', 'not_in', '1,2,3']], [], null, 50, 0);
+
+    expect($sql)->toBe('SELECT id FROM posts WHERE id NOT IN (:f0_0, :f0_1, :f0_2) LIMIT 50 OFFSET 0');
+    expect($params)->toBe([':f0_0' => '1', ':f0_1' => '2', ':f0_2' => '3']);
+});
+
+it('builds an is_null clause', function () {
+    [$sql, $params] = QueryBuilder::select('posts', ['id'], [['subtitle', 'is_null', '']], [], null, 50, 0);
+
+    expect($sql)->toBe('SELECT id FROM posts WHERE subtitle IS NULL LIMIT 50 OFFSET 0');
+    expect($params)->toBe([]);
+});
+
+it('builds an is_not_null clause', function () {
+    [$sql, $params] = QueryBuilder::select('posts', ['id'], [['subtitle', 'is_not_null', '']], [], null, 50, 0);
+
+    expect($sql)->toBe('SELECT id FROM posts WHERE subtitle IS NOT NULL LIMIT 50 OFFSET 0');
+    expect($params)->toBe([]);
 });
 
 it('builds an in clause with one placeholder per value', function () {

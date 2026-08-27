@@ -118,6 +118,11 @@ final class Api
 
         $extraColumns = array_values(array_diff($this->localJoinColumns($resource, $embeds), $columns));
 
+        [$countSql, $countParams] = QueryBuilder::count($resource->table, $filters, $conditions);
+        $countStmt = $this->pdo->prepare($countSql);
+        $countStmt->execute($countParams);
+        $total = (int) $countStmt->fetchColumn();
+
         [$sql, $params] = QueryBuilder::select(
             $resource->table,
             array_merge($columns, $extraColumns),
@@ -133,7 +138,11 @@ final class Api
 
         $rows = $this->embedRelations($resource, $stmt->fetchAll(), $embeds, $context);
 
-        return Response::json($this->stripColumns($rows, $extraColumns));
+        return Response::json($this->stripColumns($rows, $extraColumns), extraHeaders: [
+            'X-Total-Count' => (string) $total,
+            'X-Page-Limit' => (string) $limit,
+            'X-Page-Offset' => (string) $offset,
+        ]);
     }
 
     /**
@@ -194,17 +203,18 @@ final class Api
 
     /**
      * Inserts every row in $rows within a single transaction — if any row
-     * fails, none of them are persisted. Returns the created rows, in order.
+     * fails, none of them are persisted. Returns the created rows, in order,
+     * using a single SELECT after all INSERTs to avoid N+1 queries.
      *
      * @param array<int, array<string, mixed>> $rows
      * @param array<string, mixed> $context
      * @return Response Body is a list of the created rows.
-     * @throws Exceptions\ForbiddenException if `insert` has no policy registered.
+     * @throws Exceptions\ForbiddenException if `insert` or `select` has no policy registered.
      * @throws Exceptions\ValidationException if any row is empty, or references an unknown column.
      */
     private function bulkInsert(Resource $resource, array $rows, array $context): Response
     {
-        $created = [];
+        $insertedIds = [];
 
         $this->pdo->beginTransaction();
 
@@ -214,7 +224,7 @@ final class Api
                     throw new ValidationException('Each row must be an object');
                 }
 
-                $created[] = $this->insertOne($resource, $row, $context)->body;
+                $insertedIds[] = $this->performInsert($resource, $row, $context);
             }
         } catch (\Throwable $e) {
             $this->pdo->rollBack();
@@ -224,12 +234,40 @@ final class Api
 
         $this->pdo->commit();
 
-        return Response::json($created);
+        $conditions = ($resource->policyFor(Operation::Select))($context);
+        $filters = [[$resource->primaryKey, 'in', implode(',', $insertedIds)]];
+
+        [$sql, $params] = QueryBuilder::select(
+            $resource->table,
+            $resource->allowedColumns(),
+            $filters,
+            $conditions,
+            [[$resource->primaryKey, 'asc']],
+            null,
+            0,
+        );
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+
+        return Response::json($stmt->fetchAll());
     }
 
     /**
-     * Inserts a single row.
+     * Inserts a single row and returns it as a Response by re-fetching via {@see self::find()}.
      *
+     * @param array<string, mixed> $body
+     * @param array<string, mixed> $context
+     * @throws Exceptions\ForbiddenException if `insert` has no policy registered.
+     * @throws Exceptions\ValidationException if the body is empty, or references an unknown column.
+     */
+    private function insertOne(Resource $resource, array $body, array $context): Response
+    {
+        return $this->find($resource, $this->performInsert($resource, $body, $context), $context);
+    }
+
+    /**
+     * Runs the INSERT and returns the new row's primary key as a string.
      * Policy conditions are merged over the request body, so they always win
      * over client-submitted values for the same columns.
      *
@@ -238,7 +276,7 @@ final class Api
      * @throws Exceptions\ForbiddenException if `insert` has no policy registered.
      * @throws Exceptions\ValidationException if the body is empty, or references an unknown column.
      */
-    private function insertOne(Resource $resource, array $body, array $context): Response
+    private function performInsert(Resource $resource, array $body, array $context): string
     {
         $conditions = ($resource->policyFor(Operation::Insert))($context);
         $data = $this->onlyAllowedColumns($resource, $body);
@@ -253,9 +291,7 @@ final class Api
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
 
-        $id = $data[$resource->primaryKey] ?? $this->pdo->lastInsertId();
-
-        return $this->find($resource, (string) $id, $context);
+        return (string) ($data[$resource->primaryKey] ?? $this->pdo->lastInsertId());
     }
 
     /**

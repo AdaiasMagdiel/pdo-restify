@@ -14,7 +14,10 @@ use AdaiasMagdiel\PdoRestify\Exceptions\ValidationException;
 final class Filters
 {
     /** @var string[] Filter operators accepted in `column=operator.value`. */
-    private const OPERATORS = ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'like', 'in'];
+    private const OPERATORS = ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'like', 'in', 'not_in', 'is_null', 'is_not_null'];
+
+    /** @var string[] Operators that take no value — used as `column=is_null` rather than `column=operator.value`. */
+    private const NO_VALUE_OPERATORS = ['is_null', 'is_not_null'];
 
     /** @var string[] Query params that are never treated as column filters. */
     private const RESERVED = ['select', 'order', 'limit', 'offset'];
@@ -41,6 +44,11 @@ final class Filters
                 throw new ValidationException("Unknown filter column: {$column}");
             }
 
+            if (is_string($value) && in_array($value, self::NO_VALUE_OPERATORS, true)) {
+                $filters[] = [$column, $value, ''];
+                continue;
+            }
+
             if (!is_string($value) || !str_contains($value, '.')) {
                 throw new ValidationException("Invalid filter for '{$column}', expected 'operator.value'");
             }
@@ -58,11 +66,12 @@ final class Filters
     }
 
     /**
-     * Parses an `order=column.direction` param (direction defaults to `asc`).
+     * Parses an `order=col.dir,col2.dir2` param — comma-separated, each entry
+     * being `column` or `column.direction` (direction defaults to `asc`).
      *
      * @param string[] $allowedColumns
-     * @return array{0: string, 1: string}|null Null when $order is empty, otherwise [column, direction].
-     * @throws ValidationException if the column is outside the whitelist or the direction isn't `asc`/`desc`.
+     * @return list<array{0: string, 1: string}>|null Null when $order is empty, otherwise a list of [column, direction] pairs.
+     * @throws ValidationException if a column is outside the whitelist or a direction isn't `asc`/`desc`.
      */
     public static function order(?string $order, array $allowedColumns): ?array
     {
@@ -70,19 +79,25 @@ final class Filters
             return null;
         }
 
-        $parts = explode('.', $order, 2);
-        $column = $parts[0];
-        $direction = strtolower($parts[1] ?? 'asc');
+        $result = [];
 
-        if (!in_array($column, $allowedColumns, true)) {
-            throw new ValidationException("Unknown order column: {$column}");
+        foreach (explode(',', $order) as $part) {
+            $parts = explode('.', trim($part), 2);
+            $column = $parts[0];
+            $direction = strtolower($parts[1] ?? 'asc');
+
+            if (!in_array($column, $allowedColumns, true)) {
+                throw new ValidationException("Unknown order column: {$column}");
+            }
+
+            if (!in_array($direction, ['asc', 'desc'], true)) {
+                throw new ValidationException("Unknown order direction: {$direction}");
+            }
+
+            $result[] = [$column, $direction];
         }
 
-        if (!in_array($direction, ['asc', 'desc'], true)) {
-            throw new ValidationException("Unknown order direction: {$direction}");
-        }
-
-        return [$column, $direction];
+        return $result;
     }
 
     /**

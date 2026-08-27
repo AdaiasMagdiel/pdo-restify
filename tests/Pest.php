@@ -22,7 +22,8 @@ function sqliteConnection(): PDO
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
             body TEXT NOT NULL,
-            user_id INTEGER NOT NULL
+            user_id INTEGER NOT NULL,
+            subtitle TEXT
         )
     ');
 

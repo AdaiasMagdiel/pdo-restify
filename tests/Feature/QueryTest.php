@@ -86,3 +86,56 @@ it('restricts the returned columns to what select= asks for', function () {
 
     expect(array_keys($response->body[0]))->toBe(['id', 'title']);
 });
+
+it('applies the not_in operator against real data', function () {
+    $response = $this->api->handle(new Request('GET', '/posts', ['id' => 'not_in.1,3', 'order' => 'id.asc']), []);
+
+    expect(array_column($response->body, 'id'))->toBe([2]);
+});
+
+it('applies multi-column ordering', function () {
+    $response = $this->api->handle(new Request('GET', '/posts', ['order' => 'user_id.asc,id.desc']), []);
+
+    $ids = array_column($response->body, 'id');
+    expect($ids)->toBe([3, 2, 1]);
+});
+
+it('includes X-Total-Count and pagination headers in the list response', function () {
+    $response = $this->api->handle(new Request('GET', '/posts', ['limit' => '2', 'offset' => '0']), []);
+
+    expect($response->headers['X-Total-Count'])->toBe('3');
+    expect($response->headers['X-Page-Limit'])->toBe('2');
+    expect($response->headers['X-Page-Offset'])->toBe('0');
+    expect($response->body)->toHaveCount(2);
+});
+
+it('applies the is_null operator against real data', function () {
+    $this->pdo->exec("INSERT INTO posts (title, body, user_id, subtitle) VALUES ('With subtitle', 'Body', 1, 'sub')");
+
+    $resource = (new Resource('posts'))
+        ->columns(['id', 'title', 'body', 'user_id', 'subtitle'])
+        ->allow(Operation::Select);
+
+    $api = (new Api($this->pdo))->register($resource);
+    $response = $api->handle(new Request('GET', '/posts', ['subtitle' => 'is_null', 'order' => 'id.asc']), []);
+
+    expect($response->status)->toBe(200);
+    foreach ($response->body as $row) {
+        expect($row['subtitle'])->toBeNull();
+    }
+});
+
+it('applies the is_not_null operator against real data', function () {
+    $this->pdo->exec("INSERT INTO posts (title, body, user_id, subtitle) VALUES ('With subtitle', 'Body', 1, 'sub')");
+
+    $resource = (new Resource('posts'))
+        ->columns(['id', 'title', 'body', 'user_id', 'subtitle'])
+        ->allow(Operation::Select);
+
+    $api = (new Api($this->pdo))->register($resource);
+    $response = $api->handle(new Request('GET', '/posts', ['subtitle' => 'is_not_null']), []);
+
+    expect($response->status)->toBe(200);
+    expect($response->body)->toHaveCount(1);
+    expect($response->body[0]['subtitle'])->toBe('sub');
+});
