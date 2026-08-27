@@ -1,0 +1,55 @@
+name: Integration
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  driver:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - driver: mysql
+            image: mysql:8.4
+          - driver: mariadb
+            image: mariadb:11
+
+    services:
+      database:
+        image: ${{ matrix.image }}
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: pdo_restify_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo, pdo_mysql
+          coverage: none
+
+      - name: Install dependencies
+        uses: ramsey/composer-install@v3
+
+      - name: Run integration tests against ${{ matrix.driver }}
+        env:
+          PDO_RESTIFY_TEST_DRIVER: ${{ matrix.driver }}
+          PDO_RESTIFY_TEST_HOST: 127.0.0.1
+          PDO_RESTIFY_TEST_PORT: 3306
+          PDO_RESTIFY_TEST_DATABASE: pdo_restify_test
+          PDO_RESTIFY_TEST_USERNAME: root
+          PDO_RESTIFY_TEST_PASSWORD: root
+        run: ./vendor/bin/pest tests/Integration

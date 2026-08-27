@@ -3,7 +3,7 @@
 use AdaiasMagdiel\PdoRestify\Api;
 use AdaiasMagdiel\PdoRestify\Resource;
 
-uses(Tests\TestCase::class)->in('Unit', 'Feature');
+uses(Tests\TestCase::class)->in('Unit', 'Feature', 'Integration');
 
 /**
  * Creates an in-memory SQLite connection seeded with a `posts` table,
