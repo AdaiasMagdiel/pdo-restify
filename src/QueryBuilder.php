@@ -186,9 +186,32 @@ final class QueryBuilder
         $i = 0;
 
         foreach ($conditions as $column => $value) {
-            $ph = ":c{$i}";
-            $clauses[] = "{$column} = {$ph}";
-            $params[$ph] = $value;
+            if (is_array($value) && isset($value['op'])) {
+                $op  = $value['op'];
+                $val = $value['value'] ?? null;
+
+                if ($op === 'is_null') {
+                    $clauses[] = "{$column} IS NULL";
+                } elseif ($op === 'is_not_null') {
+                    $clauses[] = "{$column} IS NOT NULL";
+                } elseif (in_array($op, ['eq', 'ne', 'gt', 'gte', 'lt', 'lte'], true)) {
+                    $ph = ":c{$i}";
+                    $sqlOp = match ($op) {
+                        'eq'  => '=',
+                        'ne'  => '!=',
+                        'gt'  => '>',
+                        'gte' => '>=',
+                        'lt'  => '<',
+                        'lte' => '<=',
+                    };
+                    $clauses[]    = "{$column} {$sqlOp} {$ph}";
+                    $params[$ph]  = $val;
+                }
+            } else {
+                $ph = ":c{$i}";
+                $clauses[] = "{$column} = {$ph}";
+                $params[$ph] = $value;
+            }
             $i++;
         }
 

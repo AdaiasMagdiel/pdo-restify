@@ -280,7 +280,7 @@ final class Api
     {
         $conditions = ($resource->policyFor(Operation::Insert))($context);
         $data = $this->onlyAllowedColumns($resource, $body);
-        $data = array_merge($data, $conditions);
+        $data = array_merge($data, self::scalarConditions($conditions));
 
         if ($data === []) {
             throw new ValidationException('No data to insert');
@@ -321,7 +321,7 @@ final class Api
             throw new ValidationException('No data to update');
         }
 
-        $data = array_merge($data, $policyConditions);
+        $data = array_merge($data, self::scalarConditions($policyConditions));
 
         $whereConditions = $policyConditions;
         $whereConditions[$resource->primaryKey] = $id;
@@ -653,5 +653,24 @@ final class Api
     private static function isBulk(array $body): bool
     {
         return $body !== [] && array_is_list($body) && is_array($body[0]);
+    }
+
+    /**
+     * Filters out operator-based conditions (arrays with an `op` key) from a
+     * policy condition map, keeping only scalar equality conditions. Used when
+     * merging policy conditions into INSERT/UPDATE data — operator conditions
+     * like `is_null` or `gt` are meaningful in WHERE clauses but not as values
+     * to write. They still appear in the $whereConditions / $conditions passed
+     * to QueryBuilder, which handles them correctly.
+     *
+     * @param array<string, mixed> $conditions
+     * @return array<string, mixed>
+     */
+    private static function scalarConditions(array $conditions): array
+    {
+        return array_filter(
+            $conditions,
+            static fn (mixed $v): bool => !is_array($v) || !isset($v['op']),
+        );
     }
 }
