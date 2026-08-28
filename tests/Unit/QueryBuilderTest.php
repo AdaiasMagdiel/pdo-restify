@@ -70,3 +70,34 @@ it('rejects an unsafe condition key in delete', function () {
 it('rejects an unsafe table name', function () {
     QueryBuilder::select('posts; DROP TABLE posts; --', ['id'], [], [], null, 10, 0);
 })->throws(InvalidArgumentException::class);
+
+it('builds a select with an is_null operator condition', function () {
+    [$sql, $params] = QueryBuilder::select('posts', ['id'], [], ['deleted_at' => ['op' => 'is_null']], null, 10, 0);
+
+    expect($sql)->toBe('SELECT id FROM posts WHERE deleted_at IS NULL LIMIT 10 OFFSET 0');
+    expect($params)->toBe([]);
+});
+
+it('builds a select with an is_not_null operator condition', function () {
+    [$sql, $params] = QueryBuilder::select('posts', ['id'], [], ['published_at' => ['op' => 'is_not_null']], null, 10, 0);
+
+    expect($sql)->toBe('SELECT id FROM posts WHERE published_at IS NOT NULL LIMIT 10 OFFSET 0');
+    expect($params)->toBe([]);
+});
+
+it('builds a select with a gt operator condition', function () {
+    [$sql, $params] = QueryBuilder::select('posts', ['id'], [], ['views' => ['op' => 'gt', 'value' => 100]], null, 10, 0);
+
+    expect($sql)->toBe('SELECT id FROM posts WHERE views > :c0 LIMIT 10 OFFSET 0');
+    expect($params)->toBe([':c0' => 100]);
+});
+
+it('builds a select mixing scalar and operator conditions', function () {
+    [$sql, $params] = QueryBuilder::select('posts', ['id'], [], [
+        'user_id'    => 1,
+        'deleted_at' => ['op' => 'is_null'],
+    ], null, 10, 0);
+
+    expect($sql)->toBe('SELECT id FROM posts WHERE user_id = :c0 AND deleted_at IS NULL LIMIT 10 OFFSET 0');
+    expect($params)->toBe([':c0' => 1]);
+});
