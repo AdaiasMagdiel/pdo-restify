@@ -86,10 +86,10 @@ final class Api
                 'POST' => $this->insert($resource, $request->body, $context),
                 'PATCH', 'PUT' => $id !== null
                     ? $this->update($resource, $id, $request->body, $context)
-                    : $this->bulkUpdate($resource, $request->body, $context),
+                    : $this->updateNoId($resource, $request->body, $request->query, $context),
                 'DELETE' => $id !== null
                     ? $this->delete($resource, $id, $context)
-                    : $this->bulkDelete($resource, $request->body, $context),
+                    : $this->deleteNoId($resource, $request->body, $request->query, $context),
                 default => throw new BadRequestException("Unsupported method: {$request->method}"),
             };
         } catch (ApiException $e) {
@@ -159,12 +159,12 @@ final class Api
     private function find(Resource $resource, string $id, array $context, array $query = []): Response
     {
         $conditions = ($resource->policyFor(Operation::Select))($context);
-        $conditions[$resource->primaryKey] = $id;
+        $idFilter = [[$resource->primaryKey, 'eq', $id]];
 
         [$columns, $embeds] = Filters::select($query['select'] ?? null, $resource->allowedColumns(), $resource->relationNames());
         $extraColumns = array_values(array_diff($this->localJoinColumns($resource, $embeds), $columns));
 
-        [$sql, $params] = QueryBuilder::select($resource->table, array_merge($columns, $extraColumns), [], $conditions, null, 1, 0);
+        [$sql, $params] = QueryBuilder::select($resource->table, array_merge($columns, $extraColumns), $idFilter, $conditions, null, 1, 0);
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
@@ -295,14 +295,10 @@ final class Api
     }
 
     /**
-     * Handles `PATCH|PUT /{table}/{id}`.
-     *
-     * Policy conditions are merged over the request body — same as insert —
-     * so a column the policy uses to scope rows (`user_id`, `tenant_id`, ...)
-     * can never be reassigned by the client just because it also happens to
-     * be in the resource's writable whitelist. Without this, a caller could
-     * update a row they own while changing its ownership/tenant in the same
-     * request, since the WHERE clause only checks the *current* value.
+     * Handles `PATCH|PUT /{table}/{id}`. An id in the path is sugar for a
+     * `{pk}=eq.{id}` filter — {@see self::applyUpdate()} is the same code
+     * path a filtered `PATCH /{table}?...` (see {@see self::filteredUpdate()})
+     * runs through.
      *
      * @param array<string, mixed> $body
      * @param array<string, mixed> $context
@@ -311,6 +307,42 @@ final class Api
      * @throws Exceptions\NotFoundException if no row matches the id and policy conditions.
      */
     private function update(Resource $resource, string $id, array $body, array $context): Response
+    {
+        $rows = $this->applyUpdate($resource, $body, [[$resource->primaryKey, 'eq', $id]], $context);
+
+        if ($rows === []) {
+            throw new NotFoundException("Resource '{$resource->table}' with id '{$id}' not found");
+        }
+
+        return Response::json($rows[0]);
+    }
+
+    /**
+     * Runs the UPDATE for every row matching $filters intersected with the
+     * `update` policy's conditions, and returns the resulting rows as seen
+     * under the `select` policy. Shared by a path-based `/{table}/{id}`
+     * update ({@see self::update()}) and a filtered `PATCH /{table}?...`
+     * update ({@see self::filteredUpdate()}) — an id in the path is just
+     * sugar for a `{pk}=eq.{id}` filter, so both go through here.
+     *
+     * Policy conditions are merged over the request body — so a column the
+     * policy uses to scope rows (`user_id`, `tenant_id`, ...) can never be
+     * reassigned by the client just because it also happens to be in the
+     * resource's writable whitelist. Without this, a caller could update a
+     * row they own while changing its ownership/tenant in the same request,
+     * since the WHERE clause only checks the *current* value.
+     *
+     * @param array<string, mixed> $body
+     * @param array<int, array{0: string, 1: string, 2: string}> $filters
+     * @param array<string, mixed> $context
+     * @return array<int, array<string, mixed>> The updated rows, as visible under the select
+     *                                            policy. Empty when nothing matched under the
+     *                                            update policy, or when what did match isn't
+     *                                            visible under the select policy.
+     * @throws Exceptions\ForbiddenException if `update` has no policy registered.
+     * @throws Exceptions\ValidationException if there's no data left to update, or it references an unknown column.
+     */
+    private function applyUpdate(Resource $resource, array $body, array $filters, array $context): array
     {
         $policyConditions = ($resource->policyFor(Operation::Update))($context);
 
@@ -323,42 +355,96 @@ final class Api
 
         $data = array_merge($data, self::scalarConditions($policyConditions));
 
-        $whereConditions = $policyConditions;
-        $whereConditions[$resource->primaryKey] = $id;
+        // Ids in scope are captured *before* the UPDATE runs — re-applying
+        // $filters afterward could miss rows the update itself moved out of
+        // the filter's match (e.g. `?title=like.*old*` with a body that
+        // changes `title`). Checked against the *update* policy, not
+        // $stmt->rowCount() (driver-dependent: SQLite reports rows matched
+        // by WHERE, MySQL/MariaDB report rows actually changed, so a no-op
+        // update masks a 0 either way).
+        [$idsSql, $idsParams] = QueryBuilder::select($resource->table, [$resource->primaryKey], $filters, $policyConditions, null, null, 0);
+        $idsStmt = $this->pdo->prepare($idsSql);
+        $idsStmt->execute($idsParams);
+        $ids = $idsStmt->fetchAll(PDO::FETCH_COLUMN);
 
-        // Checked against the *update* policy before writing, not $stmt->rowCount()
-        // (driver-dependent: SQLite reports rows matched by WHERE, MySQL/MariaDB
-        // report rows actually changed, so a no-op update masks a 0 either way)
-        // and not by re-fetching afterward under the *select* policy either — if
-        // select is public but update is owner-scoped, a denied update on someone
-        // else's row would otherwise still resolve via find() and come back 200
-        // with the unchanged row instead of 404.
-        if (!$this->exists($resource, $whereConditions)) {
-            throw new NotFoundException("Resource '{$resource->table}' with id '{$id}' not found");
+        if ($ids === []) {
+            return [];
         }
 
-        [$sql, $params] = QueryBuilder::update($resource->table, $data, $whereConditions);
+        [$sql, $params] = QueryBuilder::update($resource->table, $data, $policyConditions, $filters);
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
 
-        return $this->find($resource, $id, $context);
+        // Re-fetched under the *select* policy, not the update conditions —
+        // if select is public but update is owner-scoped, a denied update on
+        // someone else's row must not resolve and echo the row back anyway.
+        $selectConditions = ($resource->policyFor(Operation::Select))($context);
+        $idFilter = [[$resource->primaryKey, 'in', implode(',', $ids)]];
+
+        [$selectSql, $selectParams] = QueryBuilder::select(
+            $resource->table,
+            $resource->allowedColumns(),
+            $idFilter,
+            $selectConditions,
+            [[$resource->primaryKey, 'asc']],
+            null,
+            0,
+        );
+
+        $selectStmt = $this->pdo->prepare($selectSql);
+        $selectStmt->execute($selectParams);
+
+        return $selectStmt->fetchAll();
     }
 
     /**
-     * Whether a row matching $conditions exists, independent of any policy —
-     * $conditions is expected to already carry whatever policy scoping applies.
+     * Handles `PATCH|PUT /{table}` with no id — dispatches between a
+     * filtered update (query string carries `column=operator.value`
+     * filters, e.g. `?status=eq.draft`) and a bulk update (body is a list
+     * of row objects, each carrying its own primary key). The two can't be
+     * combined in the same request.
      *
-     * @param array<string, mixed> $conditions
+     * @param array<string, mixed> $body
+     * @param array<string, mixed> $query
+     * @param array<string, mixed> $context
+     * @throws Exceptions\BadRequestException if filters and a bulk (array) body are both present,
+     *                                          or if neither an id, filters, nor a bulk body is given.
+     * @throws Exceptions\ValidationException if a filter targets an unknown column or is malformed.
      */
-    private function exists(Resource $resource, array $conditions): bool
+    private function updateNoId(Resource $resource, array $body, array $query, array $context): Response
     {
-        [$sql, $params] = QueryBuilder::select($resource->table, [$resource->primaryKey], [], $conditions, null, 1, 0);
+        $filters = Filters::parse($query, $resource->allowedColumns());
 
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
+        if ($filters !== []) {
+            if (self::isBulk($body)) {
+                throw new BadRequestException('Cannot combine filter query string params with a bulk (array) body');
+            }
 
-        return $stmt->fetch() !== false;
+            return $this->filteredUpdate($resource, $body, $filters, $context);
+        }
+
+        return $this->bulkUpdate($resource, $body, $context);
+    }
+
+    /**
+     * Handles a filtered `PATCH|PUT /{table}?column=operator.value` — updates
+     * every row matching both the filters and the `update` policy's
+     * conditions, via the same {@see self::applyUpdate()} a path-based
+     * `/{table}/{id}` update runs through. Unlike a single/bulk update by
+     * id, matching zero rows is not an error: the response is simply an
+     * empty list, the same way a `GET` list with no matches returns one.
+     *
+     * @param array<string, mixed> $body
+     * @param array<int, array{0: string, 1: string, 2: string}> $filters
+     * @param array<string, mixed> $context
+     * @return Response Body is a list of the updated rows.
+     * @throws Exceptions\ForbiddenException if `update` has no policy registered.
+     * @throws Exceptions\ValidationException if the body is empty, or references an unknown column.
+     */
+    private function filteredUpdate(Resource $resource, array $body, array $filters, array $context): Response
+    {
+        return Response::json($this->applyUpdate($resource, $body, $filters, $context));
     }
 
     /**
@@ -380,7 +466,8 @@ final class Api
     {
         if (!self::isBulk($body)) {
             throw new BadRequestException(
-                'An id is required to update a resource, or send a list of row objects to update in bulk',
+                'An id is required to update a resource, send a list of row objects to update in bulk, '
+                . 'or filter query string params to update every matching row',
             );
         }
 
@@ -408,7 +495,10 @@ final class Api
     }
 
     /**
-     * Handles `DELETE /{table}/{id}`.
+     * Handles `DELETE /{table}/{id}`. An id in the path is sugar for a
+     * `{pk}=eq.{id}` filter — {@see self::applyDelete()} is the same code
+     * path a filtered `DELETE /{table}?...` (see {@see self::filteredDelete()})
+     * runs through.
      *
      * @param array<string, mixed> $context
      * @throws Exceptions\ForbiddenException if `delete` has no policy registered.
@@ -416,17 +506,80 @@ final class Api
      */
     private function delete(Resource $resource, string $id, array $context): Response
     {
-        $conditions = ($resource->policyFor(Operation::Delete))($context);
-        $conditions[$resource->primaryKey] = $id;
+        if ($this->applyDelete($resource, [[$resource->primaryKey, 'eq', $id]], $context) === 0) {
+            throw new NotFoundException("Resource '{$resource->table}' with id '{$id}' not found");
+        }
 
-        [$sql, $params] = QueryBuilder::delete($resource->table, $conditions);
+        return Response::json(null, 204);
+    }
+
+    /**
+     * Runs the DELETE for every row matching $filters intersected with the
+     * `delete` policy's conditions. Shared by a path-based `/{table}/{id}`
+     * delete ({@see self::delete()}) and a filtered `DELETE /{table}?...`
+     * delete ({@see self::filteredDelete()}) — an id in the path is just
+     * sugar for a `{pk}=eq.{id}` filter, so both go through here.
+     *
+     * @param array<int, array{0: string, 1: string, 2: string}> $filters
+     * @param array<string, mixed> $context
+     * @return int Number of rows actually deleted.
+     * @throws Exceptions\ForbiddenException if `delete` has no policy registered.
+     */
+    private function applyDelete(Resource $resource, array $filters, array $context): int
+    {
+        $conditions = ($resource->policyFor(Operation::Delete))($context);
+
+        [$sql, $params] = QueryBuilder::delete($resource->table, $conditions, $filters);
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
 
-        if ($stmt->rowCount() === 0) {
-            throw new NotFoundException("Resource '{$resource->table}' with id '{$id}' not found");
+        return $stmt->rowCount();
+    }
+
+    /**
+     * Handles `DELETE /{table}` with no id — dispatches between a filtered
+     * delete (query string carries `column=operator.value` filters, e.g.
+     * `?views=lt.10`) and a bulk delete (body is a list of primary key
+     * values). The two can't be combined in the same request.
+     *
+     * @param array<string, mixed> $body
+     * @param array<string, mixed> $query
+     * @param array<string, mixed> $context
+     * @throws Exceptions\BadRequestException if filters and a body are both present,
+     *                                          or if neither an id, filters, nor a bulk body is given.
+     * @throws Exceptions\ValidationException if a filter targets an unknown column or is malformed.
+     */
+    private function deleteNoId(Resource $resource, array $body, array $query, array $context): Response
+    {
+        $filters = Filters::parse($query, $resource->allowedColumns());
+
+        if ($filters !== []) {
+            if ($body !== []) {
+                throw new BadRequestException('Cannot combine filter query string params with a delete body');
+            }
+
+            return $this->filteredDelete($resource, $filters, $context);
         }
+
+        return $this->bulkDelete($resource, $body, $context);
+    }
+
+    /**
+     * Handles a filtered `DELETE /{table}?column=operator.value` — deletes
+     * every row matching both the filters and the `delete` policy's
+     * conditions, via the same {@see self::applyDelete()} a path-based
+     * `/{table}/{id}` delete runs through. Unlike a single/bulk delete by
+     * id, matching zero rows is not an error — the response is `204`
+     * either way.
+     *
+     * @param array<int, array{0: string, 1: string, 2: string}> $filters
+     * @param array<string, mixed> $context
+     * @throws Exceptions\ForbiddenException if `delete` has no policy registered.
+     */
+    private function filteredDelete(Resource $resource, array $filters, array $context): Response
+    {
+        $this->applyDelete($resource, $filters, $context);
 
         return Response::json(null, 204);
     }
@@ -448,7 +601,8 @@ final class Api
     {
         if ($body === [] || !array_is_list($body)) {
             throw new BadRequestException(
-                'An id is required to delete a resource, or send a list of ids to delete in bulk',
+                'An id is required to delete a resource, send a list of ids to delete in bulk, '
+                . 'or filter query string params to delete every matching row',
             );
         }
 

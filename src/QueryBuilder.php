@@ -124,13 +124,16 @@ final class QueryBuilder
      *
      * @param array<string, mixed> $data Column => value pairs to set.
      * @param array<string, mixed> $conditions Equality conditions scoping which rows are updated.
+     * @param array<int, array{0: string, 1: string, 2: string}> $filters Tuples of [column, operator, rawValue],
+     *                                                                     as returned by {@see Filters::parse()},
+     *                                                                     ANDed with $conditions.
      * @return array{0: string, 1: array<string, mixed>}
-     * @throws \InvalidArgumentException if $table, a column of $data, or a condition key
+     * @throws \InvalidArgumentException if $table, a column of $data, a condition key, or a filter column
      *                                    is not a valid SQL identifier.
      */
-    public static function update(string $table, array $data, array $conditions): array
+    public static function update(string $table, array $data, array $conditions, array $filters = []): array
     {
-        self::assertIdentifiers([$table, ...array_keys($data), ...array_keys($conditions)]);
+        self::assertIdentifiers([$table, ...array_keys($data), ...array_keys($conditions), ...array_column($filters, 0)]);
 
         $sets = [];
         $params = [];
@@ -142,7 +145,7 @@ final class QueryBuilder
 
         $sql = "UPDATE {$table} SET " . implode(', ', $sets);
 
-        [$where, $whereParams] = self::buildWhere([], $conditions);
+        [$where, $whereParams] = self::buildWhere($filters, $conditions);
         if ($where !== '') {
             $sql .= " WHERE {$where}";
         }
@@ -154,16 +157,19 @@ final class QueryBuilder
      * Builds a `DELETE FROM table WHERE ...` query.
      *
      * @param array<string, mixed> $conditions Equality conditions scoping which rows are deleted.
+     * @param array<int, array{0: string, 1: string, 2: string}> $filters Tuples of [column, operator, rawValue],
+     *                                                                     as returned by {@see Filters::parse()},
+     *                                                                     ANDed with $conditions.
      * @return array{0: string, 1: array<string, mixed>}
-     * @throws \InvalidArgumentException if $table or a condition key is not a valid SQL identifier.
+     * @throws \InvalidArgumentException if $table, a condition key, or a filter column is not a valid SQL identifier.
      */
-    public static function delete(string $table, array $conditions): array
+    public static function delete(string $table, array $conditions, array $filters = []): array
     {
-        self::assertIdentifiers([$table, ...array_keys($conditions)]);
+        self::assertIdentifiers([$table, ...array_keys($conditions), ...array_column($filters, 0)]);
 
         $sql = "DELETE FROM {$table}";
 
-        [$where, $params] = self::buildWhere([], $conditions);
+        [$where, $params] = self::buildWhere($filters, $conditions);
         if ($where !== '') {
             $sql .= " WHERE {$where}";
         }

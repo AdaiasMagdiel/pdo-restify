@@ -255,13 +255,14 @@ into an error `Response` (see [Error handling](06-error-handling.md)).
 | `GET` | `/{table}/{id}` | Fetch a single row; `select=` can embed relations. |
 | `POST` | `/{table}` | Insert a row, or bulk-insert if the body is a list of objects. |
 | `PATCH` or `PUT` | `/{table}/{id}` | Update a row. |
-| `PATCH` or `PUT` | `/{table}` | Bulk-update rows; each body object must include the primary key. |
+| `PATCH` or `PUT` | `/{table}` | Bulk-update rows (body is a list of objects, each including the primary key), or filtered update (query string filters, no id in path). |
 | `DELETE` | `/{table}/{id}` | Delete a row. |
-| `DELETE` | `/{table}` | Bulk-delete rows; body is a list of primary key values. |
+| `DELETE` | `/{table}` | Bulk-delete rows (body is a list of primary key values), or filtered delete (query string filters, no id in path). |
 
-See [Bulk operations](08-bulk-operations.md) for the bulk insert/update/delete
-request and response shape, and the all-or-nothing transaction semantics; see
-[Relationships](09-relationships.md) for `select=relation(...)` embeds.
+See [Bulk operations](08-bulk-operations.md) for the bulk/filtered
+insert/update/delete request and response shape, and the all-or-nothing
+transaction semantics; see [Relationships](09-relationships.md) for
+`select=relation(...)` embeds.
 
 ---
 

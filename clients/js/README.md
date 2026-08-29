@@ -136,15 +136,24 @@ await api.from<Post>('posts').updateMany([
   { id: 2, title: 'B' },
 ]);
 
+// PATCH /{table}?... — filtered update; applies to every row matching the
+// chained filters (and the server's update policy), not just rows you name
+await api.from<Post>('posts').updateWhere({ status: 'archived' }).eq('status', 'draft');
+
 // DELETE /{table}/{id}
 await api.from('posts').delete(1);
 
 // DELETE /{table} — bulk delete, a list of primary key values
 await api.from('posts').deleteMany([1, 2, 3]);
+
+// DELETE /{table}?... — filtered delete; removes every row matching the
+// chained filters (and the server's delete policy)
+await api.from('posts').deleteWhere().lt('views', 10);
 ```
 
 Bulk insert/update/delete run in a single transaction on the server — one
-bad row fails the whole batch. See the PHP library's
+bad row fails the whole batch. `updateWhere`/`deleteWhere` match zero rows
+without erroring — see the PHP library's
 [Bulk operations](../../docs/08-bulk-operations.md) doc.
 
 ### Handling results

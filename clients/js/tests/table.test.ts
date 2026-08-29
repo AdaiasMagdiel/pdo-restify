@@ -72,6 +72,19 @@ describe('TableClient wire format', () => {
     ]);
   });
 
+  it('updateWhere() sends a PATCH to /{table} with filters in the query string', async () => {
+    const mock = createFetchMock({ status: 200, body: [] });
+    const api = createClient('https://api.example.com/', { fetch: mock.fetch });
+
+    await api.from('posts').updateWhere({ status: 'archived' }).eq('status', 'draft');
+
+    expect(mock.calls[0]!.method).toBe('PATCH');
+    const url = new URL(mock.calls[0]!.url);
+    expect(url.pathname).toBe('/posts');
+    expect(url.searchParams.get('status')).toBe('eq.draft');
+    expect(mock.calls[0]!.body).toEqual({ status: 'archived' });
+  });
+
   it('delete() sends a DELETE to /{table}/{id} with no body', async () => {
     const mock = createFetchMock({ status: 204 });
     const api = createClient('https://api.example.com/', { fetch: mock.fetch });
@@ -92,5 +105,18 @@ describe('TableClient wire format', () => {
     expect(mock.calls[0]!.method).toBe('DELETE');
     expect(new URL(mock.calls[0]!.url).pathname).toBe('/posts');
     expect(mock.calls[0]!.body).toEqual([1, 2, 3]);
+  });
+
+  it('deleteWhere() sends a DELETE to /{table} with filters in the query string', async () => {
+    const mock = createFetchMock({ status: 204 });
+    const api = createClient('https://api.example.com/', { fetch: mock.fetch });
+
+    await api.from('posts').deleteWhere().lt('views', 10);
+
+    expect(mock.calls[0]!.method).toBe('DELETE');
+    const url = new URL(mock.calls[0]!.url);
+    expect(url.pathname).toBe('/posts');
+    expect(url.searchParams.get('views')).toBe('lt.10');
+    expect(mock.calls[0]!.body).toBeNull();
   });
 });

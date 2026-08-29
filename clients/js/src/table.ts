@@ -50,6 +50,17 @@ export class TableClient<T extends Record<string, unknown> = Record<string, unkn
     return new PdoRestifyRequest<T[]>(this.baseUrl, 'PATCH', this.table, this.options, rows);
   }
 
+  /**
+   * `PATCH /{table}?...` — filtered update: applies `data` to every row
+   * matching both the chained filters (`.eq()`, `.gt()`, `.like()`, ...) and
+   * the server's `update` policy. Matching zero rows is not an error — the
+   * result is an empty array. Chain filters before awaiting, e.g.
+   * `table.updateWhere({ status: 'archived' }).eq('status', 'draft')`.
+   */
+  updateWhere(data: Partial<T>): PdoRestifyRequest<T[]> {
+    return new PdoRestifyRequest<T[]>(this.baseUrl, 'PATCH', this.table, this.options, data);
+  }
+
   /** `DELETE /{table}/{id}` — delete a single row. */
   delete(id: string | number): PdoRestifyRequest<null> {
     return new PdoRestifyRequest<null>(this.baseUrl, 'DELETE', `${this.table}/${encodeURIComponent(id)}`, this.options);
@@ -58,5 +69,15 @@ export class TableClient<T extends Record<string, unknown> = Record<string, unkn
   /** `DELETE /{table}` — bulk delete, given a list of primary key values. */
   deleteMany(ids: Array<string | number>): PdoRestifyRequest<null> {
     return new PdoRestifyRequest<null>(this.baseUrl, 'DELETE', this.table, this.options, ids);
+  }
+
+  /**
+   * `DELETE /{table}?...` — filtered delete: removes every row matching
+   * both the chained filters and the server's `delete` policy. Matching
+   * zero rows is not an error. Chain filters before awaiting, e.g.
+   * `table.deleteWhere().lt('views', 10)`.
+   */
+  deleteWhere(): PdoRestifyRequest<null> {
+    return new PdoRestifyRequest<null>(this.baseUrl, 'DELETE', this.table, this.options);
   }
 }

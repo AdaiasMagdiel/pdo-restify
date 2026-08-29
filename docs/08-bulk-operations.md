@@ -65,6 +65,36 @@ an id doesn't exist or falls outside them.
 The response is a `204 No Content` with an empty body, same as a single
 delete — there's nothing per-row to report back for a delete.
 
+## Filtered update and delete
+
+`/{table}/{id}` isn't a distinct code path — it's sugar for a `{pk}=eq.{id}`
+filter internally. `PATCH`/`PUT` and `DELETE` accept the same
+`column=operator.value` filters as `GET /{table}` (see
+[Querying](04-querying.md#filters)) directly in the query string too, when
+there's no id in the path and the body isn't a bulk array/id-list:
+
+```
+PATCH /posts?status=eq.draft
+{ "status": "archived" }
+```
+
+```
+DELETE /posts?views=lt.10
+```
+
+Every row matching **both** the filters and the resource's `update`/`delete`
+policy conditions is affected — the two are always `AND`ed together, so a
+filter can never reach a row the policy wouldn't otherwise scope. Unlike a
+single or by-id bulk update/delete, matching zero rows is **not** an error:
+a filtered `PATCH` returns `200` with an empty array, and a filtered
+`DELETE` returns `204`, the same way a `GET` list with no matches returns an
+empty array instead of `404`.
+
+A filter query string and a bulk (array) body can't be combined in the same
+request — `400 Bad Request` if both are present. `order`, `limit`, and
+`offset` are accepted in the query string but ignored for these two verbs;
+only the filter keys apply.
+
 ## All rows commit together, or none do
 
 Bulk insert, update, and delete all run inside a single database
