@@ -6,6 +6,7 @@ namespace AdaiasMagdiel\PdoRestify;
 
 use AdaiasMagdiel\PdoRestify\Exceptions\ApiException;
 use AdaiasMagdiel\PdoRestify\Exceptions\BadRequestException;
+use AdaiasMagdiel\PdoRestify\Exceptions\ForbiddenException;
 use AdaiasMagdiel\PdoRestify\Exceptions\NotFoundException;
 use AdaiasMagdiel\PdoRestify\Exceptions\ValidationException;
 use AdaiasMagdiel\PdoRestify\Http\Request;
@@ -107,7 +108,7 @@ final class Api
      */
     private function list(Resource $resource, array $query, array $context): Response
     {
-        $conditions = ($resource->policyFor(Operation::Select))($context);
+        $condition = ($resource->policyFor(Operation::Select))($context);
         $allowed = $resource->allowedColumns();
 
         [$columns, $embeds] = Filters::select($query['select'] ?? null, $allowed, $resource->relationNames());
@@ -118,7 +119,7 @@ final class Api
 
         $extraColumns = array_values(array_diff($this->localJoinColumns($resource, $embeds), $columns));
 
-        [$countSql, $countParams] = QueryBuilder::count($resource->table, $filters, $conditions);
+        [$countSql, $countParams] = QueryBuilder::count($resource->table, $filters, $condition);
         $countStmt = $this->pdo->prepare($countSql);
         $countStmt->execute($countParams);
         $total = (int) $countStmt->fetchColumn();
@@ -127,7 +128,7 @@ final class Api
             $resource->table,
             array_merge($columns, $extraColumns),
             $filters,
-            $conditions,
+            $condition,
             $order,
             $limit,
             $offset,
@@ -158,13 +159,13 @@ final class Api
      */
     private function find(Resource $resource, string $id, array $context, array $query = []): Response
     {
-        $conditions = ($resource->policyFor(Operation::Select))($context);
+        $condition = ($resource->policyFor(Operation::Select))($context);
         $idFilter = [[$resource->primaryKey, 'eq', $id]];
 
         [$columns, $embeds] = Filters::select($query['select'] ?? null, $resource->allowedColumns(), $resource->relationNames());
         $extraColumns = array_values(array_diff($this->localJoinColumns($resource, $embeds), $columns));
 
-        [$sql, $params] = QueryBuilder::select($resource->table, array_merge($columns, $extraColumns), $idFilter, $conditions, null, 1, 0);
+        [$sql, $params] = QueryBuilder::select($resource->table, array_merge($columns, $extraColumns), $idFilter, $condition, null, 1, 0);
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
@@ -234,14 +235,14 @@ final class Api
 
         $this->pdo->commit();
 
-        $conditions = ($resource->policyFor(Operation::Select))($context);
+        $condition = ($resource->policyFor(Operation::Select))($context);
         $filters = [[$resource->primaryKey, 'in', implode(',', $insertedIds)]];
 
         [$sql, $params] = QueryBuilder::select(
             $resource->table,
             $resource->allowedColumns(),
             $filters,
-            $conditions,
+            $condition,
             [[$resource->primaryKey, 'asc']],
             null,
             0,
@@ -268,19 +269,21 @@ final class Api
 
     /**
      * Runs the INSERT and returns the new row's primary key as a string.
-     * Policy conditions are merged over the request body, so they always win
-     * over client-submitted values for the same columns.
+     * The `insert` policy's condition, if any, is a WITH CHECK: it's
+     * re-evaluated against the row *after* it's written, and a violation
+     * deletes the row and throws — a raw SQL boolean expression can express
+     * far more than a `column => value` map ever could, but unlike that map
+     * it can't be "forced" onto missing columns, so this validates instead.
      *
      * @param array<string, mixed> $body
      * @param array<string, mixed> $context
-     * @throws Exceptions\ForbiddenException if `insert` has no policy registered.
+     * @throws Exceptions\ForbiddenException if `insert` has no policy registered, or the WITH CHECK fails.
      * @throws Exceptions\ValidationException if the body is empty, or references an unknown column.
      */
     private function performInsert(Resource $resource, array $body, array $context): string
     {
-        $conditions = ($resource->policyFor(Operation::Insert))($context);
+        $condition = ($resource->policyFor(Operation::Insert))($context);
         $data = $this->onlyAllowedColumns($resource, $body);
-        $data = array_merge($data, self::scalarConditions($conditions));
 
         if ($data === []) {
             throw new ValidationException('No data to insert');
@@ -291,7 +294,37 @@ final class Api
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
 
-        return (string) ($data[$resource->primaryKey] ?? $this->pdo->lastInsertId());
+        $pk = (string) ($data[$resource->primaryKey] ?? $this->pdo->lastInsertId());
+
+        if ($condition !== null && !$this->rowSatisfies($resource, $condition, $pk)) {
+            // Compensating delete rather than a transaction: performInsert runs both
+            // standalone and inside bulkInsert's own transaction, and either way the
+            // violating row must never remain — if we're inside bulkInsert's
+            // transaction, throwing here still triggers its rollBack() too.
+            $this->pdo
+                ->prepare("DELETE FROM {$resource->table} WHERE {$resource->primaryKey} = :pk")
+                ->execute([':pk' => $pk]);
+
+            throw new ForbiddenException("Insert into '{$resource->table}' violates the policy's WITH CHECK");
+        }
+
+        return $pk;
+    }
+
+    /**
+     * Evaluates $condition against a single row identified by $pk — the WITH
+     * CHECK re-validation shared by {@see self::performInsert()} and
+     * {@see self::applyUpdate()}.
+     */
+    private function rowSatisfies(Resource $resource, RawCondition $condition, string $pk): bool
+    {
+        $wrapped = new RawCondition("({$condition->sql}) AND {$resource->primaryKey} = :with_check_pk", $condition->params + [':with_check_pk' => $pk]);
+
+        [$sql, $params] = QueryBuilder::select($resource->table, [$resource->primaryKey], [], $wrapped, null, 1, 0);
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+
+        return $stmt->fetch() !== false;
     }
 
     /**
@@ -325,12 +358,13 @@ final class Api
      * update ({@see self::filteredUpdate()}) — an id in the path is just
      * sugar for a `{pk}=eq.{id}` filter, so both go through here.
      *
-     * Policy conditions are merged over the request body — so a column the
-     * policy uses to scope rows (`user_id`, `tenant_id`, ...) can never be
-     * reassigned by the client just because it also happens to be in the
-     * resource's writable whitelist. Without this, a caller could update a
-     * row they own while changing its ownership/tenant in the same request,
-     * since the WHERE clause only checks the *current* value.
+     * The update policy's condition scopes which rows can be touched at all
+     * (USING, merged into the WHERE clause) and, by default, is re-checked
+     * against every updated row afterward (WITH CHECK — Postgres's own
+     * default when a separate WITH CHECK isn't given). A row that no longer
+     * satisfies it after the write — e.g. the client tried to reassign a
+     * `user_id`/`tenant_id` column the policy scopes on — rolls back the
+     * whole update and throws, rather than silently keeping the old value.
      *
      * @param array<string, mixed> $body
      * @param array<int, array{0: string, 1: string, 2: string}> $filters
@@ -339,12 +373,12 @@ final class Api
      *                                            policy. Empty when nothing matched under the
      *                                            update policy, or when what did match isn't
      *                                            visible under the select policy.
-     * @throws Exceptions\ForbiddenException if `update` has no policy registered.
+     * @throws Exceptions\ForbiddenException if `update` has no policy registered, or the WITH CHECK fails.
      * @throws Exceptions\ValidationException if there's no data left to update, or it references an unknown column.
      */
     private function applyUpdate(Resource $resource, array $body, array $filters, array $context): array
     {
-        $policyConditions = ($resource->policyFor(Operation::Update))($context);
+        $condition = ($resource->policyFor(Operation::Update))($context);
 
         $data = $this->onlyAllowedColumns($resource, $body);
         unset($data[$resource->primaryKey]);
@@ -353,8 +387,6 @@ final class Api
             throw new ValidationException('No data to update');
         }
 
-        $data = array_merge($data, self::scalarConditions($policyConditions));
-
         // Ids in scope are captured *before* the UPDATE runs — re-applying
         // $filters afterward could miss rows the update itself moved out of
         // the filter's match (e.g. `?title=like.*old*` with a body that
@@ -362,7 +394,7 @@ final class Api
         // $stmt->rowCount() (driver-dependent: SQLite reports rows matched
         // by WHERE, MySQL/MariaDB report rows actually changed, so a no-op
         // update masks a 0 either way).
-        [$idsSql, $idsParams] = QueryBuilder::select($resource->table, [$resource->primaryKey], $filters, $policyConditions, null, null, 0);
+        [$idsSql, $idsParams] = QueryBuilder::select($resource->table, [$resource->primaryKey], $filters, $condition, null, null, 0);
         $idsStmt = $this->pdo->prepare($idsSql);
         $idsStmt->execute($idsParams);
         $ids = $idsStmt->fetchAll(PDO::FETCH_COLUMN);
@@ -371,22 +403,49 @@ final class Api
             return [];
         }
 
-        [$sql, $params] = QueryBuilder::update($resource->table, $data, $policyConditions, $filters);
+        // Runs its own transaction unless already inside one (e.g. called
+        // from bulkUpdate(), which wraps every row in a single transaction of
+        // its own) — either way, a WITH CHECK violation must undo the UPDATE.
+        $ownsTransaction = !$this->pdo->inTransaction();
+        if ($ownsTransaction) {
+            $this->pdo->beginTransaction();
+        }
 
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
+        try {
+            [$sql, $params] = QueryBuilder::update($resource->table, $data, $condition, $filters);
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
 
-        // Re-fetched under the *select* policy, not the update conditions —
+            if ($condition !== null) {
+                foreach ($ids as $id) {
+                    if (!$this->rowSatisfies($resource, $condition, (string) $id)) {
+                        throw new ForbiddenException("Update on '{$resource->table}' violates the policy's WITH CHECK");
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            if ($ownsTransaction) {
+                $this->pdo->rollBack();
+            }
+
+            throw $e;
+        }
+
+        if ($ownsTransaction) {
+            $this->pdo->commit();
+        }
+
+        // Re-fetched under the *select* policy, not the update condition —
         // if select is public but update is owner-scoped, a denied update on
         // someone else's row must not resolve and echo the row back anyway.
-        $selectConditions = ($resource->policyFor(Operation::Select))($context);
+        $selectCondition = ($resource->policyFor(Operation::Select))($context);
         $idFilter = [[$resource->primaryKey, 'in', implode(',', $ids)]];
 
         [$selectSql, $selectParams] = QueryBuilder::select(
             $resource->table,
             $resource->allowedColumns(),
             $idFilter,
-            $selectConditions,
+            $selectCondition,
             [[$resource->primaryKey, 'asc']],
             null,
             0,
@@ -527,9 +586,9 @@ final class Api
      */
     private function applyDelete(Resource $resource, array $filters, array $context): int
     {
-        $conditions = ($resource->policyFor(Operation::Delete))($context);
+        $condition = ($resource->policyFor(Operation::Delete))($context);
 
-        [$sql, $params] = QueryBuilder::delete($resource->table, $conditions, $filters);
+        [$sql, $params] = QueryBuilder::delete($resource->table, $condition, $filters);
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
@@ -809,22 +868,4 @@ final class Api
         return $body !== [] && array_is_list($body) && is_array($body[0]);
     }
 
-    /**
-     * Filters out operator-based conditions (arrays with an `op` key) from a
-     * policy condition map, keeping only scalar equality conditions. Used when
-     * merging policy conditions into INSERT/UPDATE data — operator conditions
-     * like `is_null` or `gt` are meaningful in WHERE clauses but not as values
-     * to write. They still appear in the $whereConditions / $conditions passed
-     * to QueryBuilder, which handles them correctly.
-     *
-     * @param array<string, mixed> $conditions
-     * @return array<string, mixed>
-     */
-    private static function scalarConditions(array $conditions): array
-    {
-        return array_filter(
-            $conditions,
-            static fn (mixed $v): bool => !is_array($v) || !isset($v['op']),
-        );
-    }
 }

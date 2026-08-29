@@ -1,65 +1,73 @@
 <?php
 
 use AdaiasMagdiel\PdoRestify\QueryBuilder;
+use AdaiasMagdiel\PdoRestify\RawCondition;
 
-it('builds a select query with filters, conditions and pagination', function () {
+it('builds a select query with filters, a condition and pagination', function () {
     [$sql, $params] = QueryBuilder::select(
         'posts',
         ['id', 'title'],
         [['title', 'like', '*hello*']],
-        ['user_id' => 1],
+        new RawCondition('user_id = :uid', [':uid' => 1]),
         [['id', 'desc']],
         10,
         5,
     );
 
-    expect($sql)->toBe('SELECT id, title FROM posts WHERE user_id = :c0 AND title LIKE :f1 ORDER BY id DESC LIMIT 10 OFFSET 5');
-    expect($params)->toBe([':c0' => 1, ':f1' => '%hello%']);
+    expect($sql)->toBe('SELECT id, title FROM posts WHERE (user_id = :uid) AND title LIKE :f0 ORDER BY id DESC LIMIT 10 OFFSET 5');
+    expect($params)->toBe([':uid' => 1, ':f0' => '%hello%']);
 });
 
 it('builds a select query with multi-column order', function () {
-    [$sql] = QueryBuilder::select('posts', ['id', 'title'], [], [], [['created_at', 'desc'], ['title', 'asc']], null, 0);
+    [$sql] = QueryBuilder::select('posts', ['id', 'title'], [], null, [['created_at', 'desc'], ['title', 'asc']], null, 0);
 
     expect($sql)->toBe('SELECT id, title FROM posts ORDER BY created_at DESC, title ASC');
 });
 
-it('builds a count query with filters and conditions', function () {
-    [$sql, $params] = QueryBuilder::count('posts', [['user_id', 'eq', '1']], ['tenant_id' => 5]);
+it('builds a count query with filters and a condition', function () {
+    [$sql, $params] = QueryBuilder::count('posts', [['user_id', 'eq', '1']], new RawCondition('tenant_id = :tid', [':tid' => 5]));
 
-    expect($sql)->toBe('SELECT COUNT(*) AS total FROM posts WHERE tenant_id = :c0 AND user_id = :f1');
-    expect($params)->toBe([':c0' => 5, ':f1' => '1']);
+    expect($sql)->toBe('SELECT COUNT(*) AS total FROM posts WHERE (tenant_id = :tid) AND user_id = :f0');
+    expect($params)->toBe([':tid' => 5, ':f0' => '1']);
+});
+
+it('builds a select query with no condition and no filters', function () {
+    [$sql, $params] = QueryBuilder::select('posts', ['id'], [], null, null, 10, 0);
+
+    expect($sql)->toBe('SELECT id FROM posts LIMIT 10 OFFSET 0');
+    expect($params)->toBe([]);
 });
 
 it('builds a not_in clause', function () {
-    [$sql, $params] = QueryBuilder::select('posts', ['id'], [['id', 'not_in', '1,2,3']], [], null, 50, 0);
+    [$sql, $params] = QueryBuilder::select('posts', ['id'], [['id', 'not_in', '1,2,3']], null, null, 50, 0);
 
     expect($sql)->toBe('SELECT id FROM posts WHERE id NOT IN (:f0_0, :f0_1, :f0_2) LIMIT 50 OFFSET 0');
     expect($params)->toBe([':f0_0' => '1', ':f0_1' => '2', ':f0_2' => '3']);
 });
 
 it('builds an is_null clause', function () {
-    [$sql, $params] = QueryBuilder::select('posts', ['id'], [['subtitle', 'is_null', '']], [], null, 50, 0);
+    [$sql, $params] = QueryBuilder::select('posts', ['id'], [['subtitle', 'is_null', '']], null, null, 50, 0);
 
     expect($sql)->toBe('SELECT id FROM posts WHERE subtitle IS NULL LIMIT 50 OFFSET 0');
     expect($params)->toBe([]);
 });
 
 it('builds an is_not_null clause', function () {
-    [$sql, $params] = QueryBuilder::select('posts', ['id'], [['subtitle', 'is_not_null', '']], [], null, 50, 0);
+    [$sql, $params] = QueryBuilder::select('posts', ['id'], [['subtitle', 'is_not_null', '']], null, null, 50, 0);
 
     expect($sql)->toBe('SELECT id FROM posts WHERE subtitle IS NOT NULL LIMIT 50 OFFSET 0');
     expect($params)->toBe([]);
 });
 
 it('builds an in clause with one placeholder per value', function () {
-    [$sql, $params] = QueryBuilder::select('posts', ['id'], [['id', 'in', '1,2,3']], [], null, 50, 0);
+    [$sql, $params] = QueryBuilder::select('posts', ['id'], [['id', 'in', '1,2,3']], null, null, 50, 0);
 
     expect($sql)->toBe('SELECT id FROM posts WHERE id IN (:f0_0, :f0_1, :f0_2) LIMIT 50 OFFSET 0');
     expect($params)->toBe([':f0_0' => '1', ':f0_1' => '2', ':f0_2' => '3']);
 });
 
 it('omits the LIMIT/OFFSET clause when limit is null', function () {
-    [$sql] = QueryBuilder::select('posts', ['id'], [], [], null, null, 0);
+    [$sql] = QueryBuilder::select('posts', ['id'], [], null, null, null, 0);
 
     expect($sql)->toBe('SELECT id FROM posts');
 });
@@ -71,67 +79,48 @@ it('builds an insert query', function () {
     expect($params)->toBe([':i_title' => 'Hello', ':i_user_id' => 1]);
 });
 
-it('builds an update query scoped by conditions', function () {
-    [$sql, $params] = QueryBuilder::update('posts', ['title' => 'Hello'], ['id' => 1, 'user_id' => 2]);
+it('builds an update query scoped by a condition', function () {
+    [$sql, $params] = QueryBuilder::update('posts', ['title' => 'Hello'], new RawCondition('id = :id AND user_id = :uid', [':id' => 1, ':uid' => 2]));
 
-    expect($sql)->toBe('UPDATE posts SET title = :s_title WHERE id = :c0 AND user_id = :c1');
-    expect($params)->toBe([':s_title' => 'Hello', ':c0' => 1, ':c1' => 2]);
+    expect($sql)->toBe('UPDATE posts SET title = :s_title WHERE (id = :id AND user_id = :uid)');
+    expect($params)->toBe([':s_title' => 'Hello', ':id' => 1, ':uid' => 2]);
 });
 
-it('builds a delete query scoped by conditions', function () {
-    [$sql, $params] = QueryBuilder::delete('posts', ['id' => 1, 'user_id' => 2]);
+it('builds an update query with no condition', function () {
+    [$sql, $params] = QueryBuilder::update('posts', ['title' => 'Hello'], null);
 
-    expect($sql)->toBe('DELETE FROM posts WHERE id = :c0 AND user_id = :c1');
-    expect($params)->toBe([':c0' => 1, ':c1' => 2]);
+    expect($sql)->toBe('UPDATE posts SET title = :s_title');
+    expect($params)->toBe([':s_title' => 'Hello']);
 });
 
-it('rejects an unsafe condition key in select, even though callers are expected to validate first', function () {
-    QueryBuilder::select('posts', ['id'], [], ['id = 1; --' => 1], null, 10, 0);
-})->throws(InvalidArgumentException::class);
+it('builds a delete query scoped by a condition', function () {
+    [$sql, $params] = QueryBuilder::delete('posts', new RawCondition('id = :id AND user_id = :uid', [':id' => 1, ':uid' => 2]));
+
+    expect($sql)->toBe('DELETE FROM posts WHERE (id = :id AND user_id = :uid)');
+    expect($params)->toBe([':id' => 1, ':uid' => 2]);
+});
+
+it('builds a delete query with no condition', function () {
+    [$sql, $params] = QueryBuilder::delete('posts', null);
+
+    expect($sql)->toBe('DELETE FROM posts');
+    expect($params)->toBe([]);
+});
 
 it('rejects an unsafe column key in insert data', function () {
     QueryBuilder::insert('posts', ['title; DROP TABLE posts; --' => 'x']);
 })->throws(InvalidArgumentException::class);
 
-it('rejects an unsafe condition key in update', function () {
-    QueryBuilder::update('posts', ['title' => 'x'], ['1=1; --' => 1]);
-})->throws(InvalidArgumentException::class);
-
-it('rejects an unsafe condition key in delete', function () {
-    QueryBuilder::delete('posts', ['1=1; --' => 1]);
-})->throws(InvalidArgumentException::class);
-
 it('rejects an unsafe table name', function () {
-    QueryBuilder::select('posts; DROP TABLE posts; --', ['id'], [], [], null, 10, 0);
+    QueryBuilder::select('posts; DROP TABLE posts; --', ['id'], [], null, null, 10, 0);
 })->throws(InvalidArgumentException::class);
 
-it('builds a select with an is_null operator condition', function () {
-    [$sql, $params] = QueryBuilder::select('posts', ['id'], [], ['deleted_at' => ['op' => 'is_null']], null, 10, 0);
+it('a RawCondition\'s sql is trusted verbatim, unlike identifiers', function () {
+    // Unlike the old column => value maps, a RawCondition's $sql is not an
+    // identifier pdo-restify validates — it's a boolean expression the
+    // registering application is fully responsible for. This is deliberate:
+    // see RawCondition's docblock.
+    [$sql] = QueryBuilder::select('posts', ['id'], [], new RawCondition('1=1; -- not a real injection here, just proving it is not rejected'), null, 10, 0);
 
-    expect($sql)->toBe('SELECT id FROM posts WHERE deleted_at IS NULL LIMIT 10 OFFSET 0');
-    expect($params)->toBe([]);
-});
-
-it('builds a select with an is_not_null operator condition', function () {
-    [$sql, $params] = QueryBuilder::select('posts', ['id'], [], ['published_at' => ['op' => 'is_not_null']], null, 10, 0);
-
-    expect($sql)->toBe('SELECT id FROM posts WHERE published_at IS NOT NULL LIMIT 10 OFFSET 0');
-    expect($params)->toBe([]);
-});
-
-it('builds a select with a gt operator condition', function () {
-    [$sql, $params] = QueryBuilder::select('posts', ['id'], [], ['views' => ['op' => 'gt', 'value' => 100]], null, 10, 0);
-
-    expect($sql)->toBe('SELECT id FROM posts WHERE views > :c0 LIMIT 10 OFFSET 0');
-    expect($params)->toBe([':c0' => 100]);
-});
-
-it('builds a select mixing scalar and operator conditions', function () {
-    [$sql, $params] = QueryBuilder::select('posts', ['id'], [], [
-        'user_id'    => 1,
-        'deleted_at' => ['op' => 'is_null'],
-    ], null, 10, 0);
-
-    expect($sql)->toBe('SELECT id FROM posts WHERE user_id = :c0 AND deleted_at IS NULL LIMIT 10 OFFSET 0');
-    expect($params)->toBe([':c0' => 1]);
+    expect($sql)->toContain('1=1; -- not a real injection here, just proving it is not rejected');
 });

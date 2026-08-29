@@ -36,6 +36,7 @@ use AdaiasMagdiel\PdoRestify\Api;
 use AdaiasMagdiel\PdoRestify\Connection;
 use AdaiasMagdiel\PdoRestify\Http\Request;
 use AdaiasMagdiel\PdoRestify\Operation;
+use AdaiasMagdiel\PdoRestify\RawCondition;
 use AdaiasMagdiel\PdoRestify\Resource;
 
 // Either let pdo-restify build the PDO instance for you...
@@ -47,8 +48,10 @@ $posts = (new Resource('posts'))
     ->columns(['id', 'title', 'body', 'user_id']);
 
 // The context comes from your app (e.g. the authenticated user). It's up to
-// you to build it and pass it into handle() below.
-$scopedToCurrentUser = fn (array $context): array => ['user_id' => $context['user_id']];
+// you to build it and pass it into handle() below. A policy returns a raw
+// SQL boolean expression (plus its bound params) — real RLS, not a DSL.
+$scopedToCurrentUser = fn (array $context): RawCondition =>
+    new RawCondition('user_id = :uid', [':uid' => $context['user_id']]);
 
 $posts
     ->allow(Operation::Select, $scopedToCurrentUser)
@@ -91,16 +94,18 @@ fake it either — it gives you the pieces and leaves the decision to you:
   operation (`Operation::Select`, `Insert`, `Update`, `Delete`) must be
   explicitly enabled with `allow()`. Anything you don't register stays
   unreachable.
-- **Row-level scoping is optional, not imposed.** The policy closure passed
-  to `allow()` returns conditions that are always enforced for that
-  operation, overriding whatever the client sent — this is how you emulate
-  RLS on top of PDO, e.g. scoping rows to the authenticated user. Skip the
+- **Row-level scoping is optional, not imposed — and it's real SQL.** The
+  policy closure passed to `allow()` returns a `RawCondition`: a raw SQL
+  boolean expression plus its bound params, always enforced for that
+  operation — `OR`, `IN (...)`, whatever your `WHERE` clause can express, not
+  a fixed condition DSL. For insert/update it doubles as a `WITH CHECK`,
+  re-validated against the written row, rolling back on violation. Skip the
   closure (`$posts->allow(Operation::Select)`) and that operation is wide
-  open, no scoping at all. Some APIs genuinely don't need per-row scoping (public
-  read-only data, an admin tool behind its own auth layer, a single-tenant
-  app), and pdo-restify won't force a no-op policy on you just for ceremony
-  — but skipping one does mean every caller sees every row for that
-  operation, so make that trade-off deliberately.
+  open, no scoping at all. Some APIs genuinely don't need per-row scoping
+  (public read-only data, an admin tool behind its own auth layer, a
+  single-tenant app), and pdo-restify won't force a no-op policy on you just
+  for ceremony — but skipping one does mean every caller sees every row for
+  that operation, so make that trade-off deliberately.
 - **Every query is parameterized.** Table, column and operator names are
   validated against a whitelist before they ever reach a SQL string; values
   are always bound as parameters, never interpolated.

@@ -3,6 +3,7 @@
 use AdaiasMagdiel\PdoRestify\Api;
 use AdaiasMagdiel\PdoRestify\Http\Request;
 use AdaiasMagdiel\PdoRestify\Operation;
+use AdaiasMagdiel\PdoRestify\RawCondition;
 use AdaiasMagdiel\PdoRestify\Resource;
 
 /**
@@ -19,22 +20,23 @@ beforeEach(function () {
 
 it('cannot reassign a policy-scoped column to another owner via update', function () {
     // Found in audit: update() only used policy conditions for the WHERE
-    // clause, never re-applied them to the SET data — so a caller could
-    // update a row they legitimately own while smuggling a different
+    // clause, never re-checked them against the written row — so a caller
+    // could update a row they legitimately own while smuggling a different
     // user_id into the same request body, silently transferring ownership
     // (or, with a tenant_id-scoped policy, injecting a row into another
-    // tenant's data). Policy-owned columns must always win, exactly like
-    // insert already enforces.
+    // tenant's data). Now the policy condition is re-checked as a WITH CHECK
+    // after the write (see Api::applyUpdate()): a row that no longer
+    // satisfies it rolls the whole update back instead of silently keeping
+    // the old value.
     $response = $this->api->handle(
         new Request('PATCH', '/posts/1', body: ['title' => 'Still mine?', 'user_id' => 999]),
         ['user_id' => 1],
     );
 
-    expect($response->status)->toBe(200);
-    expect($response->body['title'])->toBe('Still mine?');
-    expect($response->body['user_id'])->toBe(1);
+    expect($response->status)->toBe(403);
 
-    $row = $this->pdo->query('SELECT user_id FROM posts WHERE id = 1')->fetch();
+    $row = $this->pdo->query('SELECT title, user_id FROM posts WHERE id = 1')->fetch();
+    expect($row['title'])->toBe('Mine');
     expect((int) $row['user_id'])->toBe(1);
 });
 
@@ -46,8 +48,11 @@ it('cannot reassign ownership through a bulk update either', function () {
         ['user_id' => 1],
     );
 
-    expect($response->status)->toBe(200);
-    expect($response->body[0]['user_id'])->toBe(1);
+    expect($response->status)->toBe(403);
+
+    $row = $this->pdo->query('SELECT title, user_id FROM posts WHERE id = 1')->fetch();
+    expect($row['title'])->toBe('Mine');
+    expect((int) $row['user_id'])->toBe(1);
 });
 
 it('still rejects an update with nothing but the primary key', function () {
@@ -68,7 +73,7 @@ it('returns 404, not a misleading 200, when update is denied but select is publi
     $resource = (new Resource('posts'))
         ->columns(['id', 'title', 'body', 'user_id'])
         ->allow(Operation::Select) // public — no closure, unrestricted read
-        ->allow(Operation::Update, fn (array $context): array => ['user_id' => $context['user_id']]);
+        ->allow(Operation::Update, fn (array $context): RawCondition => new RawCondition('user_id = :uid', [':uid' => $context['user_id']]));
 
     $api = (new Api($this->pdo))->register($resource);
 
@@ -83,19 +88,18 @@ it('returns 404, not a misleading 200, when update is denied but select is publi
     expect($row['title'])->toBe('Mine');
 });
 
-it('rejects a table/column/condition identifier that is not a safe SQL identifier', function () {
-    // Defense in depth found in audit: QueryBuilder trusted every caller to
-    // pre-validate identifiers, but a Resource policy closure's condition
-    // *keys* were never checked by anything — only Filters (for request-
-    // derived column names) enforced a whitelist. A policy closure is
-    // ordinary application code, not request input, so this requires an
-    // unusual mistake to reach in practice — but QueryBuilder now refuses
-    // to build a query from an invalid identifier regardless of who sent it.
-    $resource = (new Resource('posts'))
-        ->columns(['id', 'title', 'body', 'user_id'])
-        ->allow(Operation::Select, fn (array $context): array => ['id; DROP TABLE posts; --' => 1]);
+it('rejects an unsafe table/column identifier from request-derived input', function () {
+    // Defense in depth: QueryBuilder trusted every caller to pre-validate
+    // identifiers, but only Filters (for request-derived column names)
+    // enforced a whitelist elsewhere — a table/column name reaching
+    // QueryBuilder is always re-checked regardless of who sent it. Since
+    // Resource::allow() policies moved to RawCondition (a raw SQL boolean
+    // expression, deliberately trusted verbatim — see its docblock), there is
+    // no longer a "condition key" for this to apply to; only $table/$columns
+    // and $filters (from Filters::parse(), already whitelist-checked) remain
+    // identifier-checked inputs, which is what this now exercises via a
+    // still-invalid $table.
+    $resource = new Resource('posts; DROP TABLE posts; --');
 
-    $api = (new Api($this->pdo))->register($resource);
-
-    $api->handle(new Request('GET', '/posts'), []);
+    $resource->columns(['id']);
 })->throws(InvalidArgumentException::class);

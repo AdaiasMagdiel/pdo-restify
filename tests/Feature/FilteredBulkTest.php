@@ -3,6 +3,7 @@
 use AdaiasMagdiel\PdoRestify\Api;
 use AdaiasMagdiel\PdoRestify\Http\Request;
 use AdaiasMagdiel\PdoRestify\Operation;
+use AdaiasMagdiel\PdoRestify\RawCondition;
 use AdaiasMagdiel\PdoRestify\Resource;
 
 beforeEach(function () {
@@ -58,7 +59,7 @@ it('excludes an updated row from the response when update is public but select i
     // otherwise see.
     $resource = (new Resource('posts'))
         ->columns(['id', 'title', 'body', 'user_id'])
-        ->allow(Operation::Select, fn (array $context): array => ['user_id' => $context['user_id']])
+        ->allow(Operation::Select, fn (array $context): RawCondition => new RawCondition('user_id = :uid', [':uid' => $context['user_id']]))
         ->allow(Operation::Update); // public — no closure, unrestricted write
 
     $api = (new Api($this->pdo))->register($resource);

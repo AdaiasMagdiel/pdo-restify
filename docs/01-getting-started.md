@@ -33,6 +33,7 @@ use AdaiasMagdiel\PdoRestify\Api;
 use AdaiasMagdiel\PdoRestify\Connection;
 use AdaiasMagdiel\PdoRestify\Http\Request;
 use AdaiasMagdiel\PdoRestify\Operation;
+use AdaiasMagdiel\PdoRestify\RawCondition;
 use AdaiasMagdiel\PdoRestify\Resource;
 
 // 1. Connection
@@ -42,8 +43,10 @@ $pdo = Connection::make('sqlite', __DIR__ . '/database.sqlite');
 $posts = (new Resource('posts'))
     ->columns(['id', 'title', 'body', 'user_id']);
 
-// 3. Policies — here every operation is scoped to the current user
-$scopedToCurrentUser = fn (array $context): array => ['user_id' => $context['user_id']];
+// 3. Policies — here every operation is scoped to the current user. A policy
+// returns a raw SQL boolean expression (plus its bound params), not a DSL.
+$scopedToCurrentUser = fn (array $context): RawCondition =>
+    new RawCondition('user_id = :uid', [':uid' => $context['user_id']]);
 
 $posts
     ->allow(Operation::Select, $scopedToCurrentUser)

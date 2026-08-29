@@ -41,40 +41,59 @@ Calling `handle()` for an operation that was never `allow()`'d returns
 `403 Forbidden`. A `Resource` with `columns()` set but no `allow()` calls at
 all is registered, but entirely closed — every request against it fails.
 
-## Policies: pdo-restify's answer to "PDO has no RLS"
+## Policies: real SQL, not a condition DSL
 
 PostgreSQL can enforce Row-Level Security at the database layer, independent
-of the application querying it. PDO has nothing like that, and pdo-restify
-doesn't pretend otherwise — instead, `allow()`'s second argument is a
-**policy**: a closure that receives the request context and returns the
-conditions that are always applied to that operation, no matter what the
-client sent.
+of the application querying it. PDO has nothing like that, so pdo-restify
+gives you the same expressive power at the application layer instead:
+`allow()`'s second argument is a **policy** — a closure that receives the
+request context and returns a `RawCondition`, a raw SQL boolean expression
+plus its bound parameters, that is always enforced on that operation no
+matter what the client sent.
 
 ```php
-$scopedToCurrentUser = fn (array $context): array => ['user_id' => $context['user_id']];
+$scopedToCurrentUser = fn (array $context): RawCondition =>
+    new RawCondition('user_id = :uid', [':uid' => $context['user_id']]);
 
 $posts->allow(Operation::Select, $scopedToCurrentUser);
 ```
 
+Because it's real SQL, a policy isn't limited to a single equality — `OR`,
+`IN (...)`, comparisons against other columns, function calls, anything your
+database's `WHERE` clause accepts is fair game:
+
+```php
+fn (array $context): RawCondition => new RawCondition(
+    'user_id = :uid OR :role = \'admin\'',
+    [':uid' => $context['user_id'], ':role' => $context['role'] ?? null],
+);
+```
+
+`RawCondition::$sql` is merged into the query verbatim — pdo-restify does not
+parse or validate it, the same way it doesn't validate the table/column names
+you pass it. This is deliberate: a policy is application code you write, not
+client input. See [Identifiers are always validated, values are always
+bound](#identifiers-are-always-validated-values-are-always-bound) below for
+exactly where the trust boundary sits.
+
 What this buys you, concretely:
 
-- **On `select`**, the conditions become an extra `AND` clause on every
-  `SELECT` — a caller can never list or fetch a row outside what the policy
-  allows, regardless of what filters they pass in the query string.
-- **On `insert`**, the conditions are merged *over* the request body — so
-  even if a malicious client sends `{"user_id": 999}`, the inserted row still
-  gets `user_id` from the policy, not from the client. This is the important
-  one: without it, `insert` policies would be decorative.
-- **On `update`/`delete`**, the conditions are combined with the row's id in
-  the `WHERE` clause — a caller can send a valid id that isn't theirs, and
-  the operation still fails as if the row didn't exist (`404`, not `403` —
-  see [Error handling](06-error-handling.md) for why that's the right status
-  to leak). `update` *also* merges the same conditions back over the write
-  data, exactly like `insert` — so a column the policy uses to scope rows
-  can never be reassigned by the client just because it's also writable.
-  Without this, a caller could `PATCH` a row they own while smuggling a
-  different `user_id`/`tenant_id` into the same request body, transferring
-  it away from themselves (or, worse, into someone else's data).
+- **On `select`**, the condition becomes an extra, parenthesized `AND` clause
+  on every `SELECT` — a caller can never list or fetch a row outside what the
+  policy allows, regardless of what filters they pass in the query string.
+- **On `update`/`delete`**, the condition is combined with the row's id in
+  the `WHERE` clause (Postgres calls this `USING`) — a caller can send a
+  valid id that isn't theirs, and the operation still fails as if the row
+  didn't exist (`404`, not `403` — see [Error handling](06-error-handling.md)
+  for why that's the right status to leak).
+- **On `insert`, and again on `update`**, the same condition is also a
+  **`WITH CHECK`**: after the write runs, pdo-restify re-evaluates it against
+  the resulting row, and rolls the write back with a `403` if it no longer
+  holds. A client that sends `{"user_id": 999}` on an insert scoped to
+  `user_id = :uid` (their own id) gets rejected outright, rather than having
+  `user_id` silently overwritten — the row must be correct as submitted, the
+  same way Postgres's own `WITH CHECK` works. This is the one that matters:
+  without it, `insert`/`update` policies would be decorative.
 
 A policy always receives the `$context` array passed as `Api::handle()`'s
 second argument, and nothing else — it has no access to the request path,
@@ -94,12 +113,12 @@ use AdaiasMagdiel\PdoRestify\Exceptions\ForbiddenException;
 $posts = (new Resource('posts'))
     ->columns(['id', 'title', 'body', 'user_id']);
 
-$adminOnly = function (array $context): array {
+$adminOnly = function (array $context): ?RawCondition {
     if (($context['role'] ?? null) !== 'admin') {
         throw new ForbiddenException('Admins only');
     }
 
-    return []; // an admin isn't scoped to their own rows either
+    return null; // an admin isn't scoped to their own rows either
 };
 
 $posts
@@ -128,7 +147,8 @@ resource rather than uniformly across all four.
 ### Multi-tenant example
 
 ```php
-$scopedToTenant = fn (array $context): array => ['tenant_id' => $context['tenant_id']];
+$scopedToTenant = fn (array $context): RawCondition =>
+    new RawCondition('tenant_id = :tid', [':tid' => $context['tenant_id']]);
 
 $orders->allow(Operation::Select, $scopedToTenant);
 $orders->allow(Operation::Insert, $scopedToTenant);
@@ -136,16 +156,16 @@ $orders->allow(Operation::Insert, $scopedToTenant);
 
 ### Role-based example
 
-A policy can return different conditions — or refuse the request outright —
+A policy can return a different condition — or refuse the request outright —
 based on anything in the context:
 
 ```php
-$scopedByRole = function (array $context): array {
+$scopedByRole = function (array $context): ?RawCondition {
     if (($context['role'] ?? null) === 'admin') {
-        return []; // no restriction — admins see every row
+        return null; // no restriction — admins see every row
     }
 
-    return ['owner_id' => $context['user_id']];
+    return new RawCondition('owner_id = :uid', [':uid' => $context['user_id']]);
 };
 
 $documents->allow(Operation::Select, $scopedByRole);
@@ -158,12 +178,12 @@ any query runs:
 ```php
 use AdaiasMagdiel\PdoRestify\Exceptions\ForbiddenException;
 
-$adminOnly = function (array $context): array {
+$adminOnly = function (array $context): ?RawCondition {
     if (($context['role'] ?? null) !== 'admin') {
         throw new ForbiddenException('Admins only');
     }
 
-    return [];
+    return null;
 };
 
 $auditLog->allow(Operation::Select, $adminOnly);
@@ -172,7 +192,8 @@ $auditLog->allow(Operation::Select, $adminOnly);
 ## Skipping a policy on purpose
 
 A policy is **optional**, not implied. Call `allow()` with no second
-argument and that operation is enabled with zero row-level restriction:
+argument — or have your closure return `null` — and that operation is
+enabled with zero row-level restriction:
 
 ```php
 $posts->allow(Operation::Select); // every caller sees every row, for this operation
@@ -181,7 +202,7 @@ $posts->allow(Operation::Select); // every caller sees every row, for this opera
 pdo-restify won't force a scoping scheme on you. Plenty of real APIs don't
 need one — a public read-only dataset, an internal admin tool that already
 sits behind its own auth middleware, a single-tenant app where "every row"
-*is* the correct answer. Writing a no-op policy (`fn () => []`, which is
+*is* the correct answer. Writing a no-op policy (`fn () => null`, which is
 exactly what an omitted one does internally) for those cases is pure
 ceremony, and forcing it wouldn't make the API any safer, just noisier.
 
@@ -194,27 +215,24 @@ stay scoped.
 
 ## Identifiers are always validated, values are always bound
 
-Two independent mechanisms keep every generated query safe, regardless of
-what a policy or a caller sends:
+Two independent mechanisms keep every generated query safe:
 
-- **Identifiers** (table names, column names — including a policy's
-  condition *keys*, e.g. the `user_id` in `['user_id' => ...]`) only ever
-  reach the SQL string after passing `Resource::assertIdentifier()` — a
+- **Identifiers** (table names, column names, order/filter columns) only
+  ever reach the SQL string after passing `Resource::assertIdentifier()` — a
   single, strict regex (`^[a-zA-Z_][a-zA-Z0-9_]*$`). `QueryBuilder` itself
   re-checks every identifier it's given, unconditionally, rather than
   trusting its caller to have done so — there is no code path that puts an
-  unvalidated identifier into a query.
-- **Values** (filter values, insert/update data, policy condition *values*)
-  are never interpolated. They're always passed through as bound parameters
-  to `PDOStatement::execute()`. See `QueryBuilder` in the
-  [API reference](api-reference.md) if you want to see exactly how.
+  unvalidated identifier into a query from request-derived input.
+- **Client-supplied values** (filter values, insert/update data) are never
+  interpolated. They're always passed through as bound parameters to
+  `PDOStatement::execute()`. See `QueryBuilder` in the [API
+  reference](api-reference.md) if you want to see exactly how.
 
-This is why a policy closure is trusted to return arbitrary *values* in its
-conditions array (`['user_id' => $context['user_id']]`) without validating
-them itself — those values are bound, not interpolated, so there's no
-injection surface even if `$context['user_id']` were attacker-controlled
-(it shouldn't be, but the query layer doesn't depend on that). The *keys* a
-policy returns are ordinary literal strings you write in your own code in
-every documented pattern here, but `QueryBuilder` doesn't assume that either
-— it validates them the same way, so even a policy that computes a
-condition key dynamically can't turn into an injection point.
+A `RawCondition`'s `$sql` is the one deliberate exception: it's merged into
+the query verbatim, unvalidated, because it *is* SQL a policy — your own
+application code — chose to write, not client input being smuggled through.
+The values a `RawCondition` references are still always bound through its
+`$params`, never interpolated, even though the surrounding expression isn't
+checked. In other words: pdo-restify trusts a policy's *code* the same way it
+trusts the table/column names you pass it, but never trusts a *value*,
+policy-supplied or not, enough to concatenate it into SQL.

@@ -3,6 +3,7 @@
 use AdaiasMagdiel\PdoRestify\Api;
 use AdaiasMagdiel\PdoRestify\Http\Request;
 use AdaiasMagdiel\PdoRestify\Operation;
+use AdaiasMagdiel\PdoRestify\RawCondition;
 use AdaiasMagdiel\PdoRestify\Resource;
 
 beforeEach(function () {
@@ -111,7 +112,7 @@ it('scopes an embedded relation through its own select policy', function () {
 
     $scopedComments = (new Resource('comments'))
         ->columns(['id', 'post_id', 'body'])
-        ->allow(Operation::Select, fn (array $context): array => ['id' => 1]); // only comment #1, ever
+        ->allow(Operation::Select, fn (array $context): RawCondition => new RawCondition('id = 1')); // only comment #1, ever
 
     $api = (new Api($this->pdo))->register($posts)->register($scopedComments);
 

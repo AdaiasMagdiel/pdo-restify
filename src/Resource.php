@@ -67,25 +67,31 @@ final class Resource
 
     /**
      * Enables an operation on this resource. The optional policy closure
-     * receives the request context and returns an associative array of
-     * column => value conditions that are always enforced, regardless of
-     * client input — this is how you scope rows like PostgreSQL's RLS would.
+     * receives the request context and returns a {@see RawCondition} — a raw
+     * SQL boolean expression plus its bound parameters — that is always
+     * enforced, regardless of client input. For SELECT/UPDATE/DELETE this is
+     * a USING-style row filter merged into the query's WHERE; for INSERT
+     * (and, again, UPDATE) it's also the WITH CHECK re-validated against the
+     * row after the write, rolling back on violation. This is how you scope
+     * rows like PostgreSQL's RLS would — with the same expressive power,
+     * since it's real SQL.
      *
      * A policy is not required: call allow(Operation::Select) with no closure
-     * to expose an operation with no row-level restriction at all. Nothing in
-     * pdo-restify forces you into a scoping scheme — that choice is yours.
+     * (or a closure returning null) to expose an operation with no row-level
+     * restriction at all. Nothing in pdo-restify forces you into a scoping
+     * scheme — that choice is yours.
      *
-     * @param (\Closure(array<string, mixed>): array<string, mixed>)|null $policy
+     * @param (\Closure(array<string, mixed>): ?RawCondition)|null $policy
      */
     public function allow(Operation $operation, ?\Closure $policy = null): static
     {
-        $this->policies[$operation->value] = $policy ?? static fn (array $context = []): array => [];
+        $this->policies[$operation->value] = $policy ?? static fn (array $context = []): ?RawCondition => null;
 
         return $this;
     }
 
     /**
-     * @return \Closure(array<string, mixed>): array<string, mixed>
+     * @return \Closure(array<string, mixed>): ?RawCondition
      * @throws ForbiddenException if $operation was never enabled via {@see self::allow()}.
      */
     public function policyFor(Operation $operation): \Closure

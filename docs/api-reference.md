@@ -93,9 +93,11 @@ public function allow(Operation $operation, ?\Closure $policy = null): static
 ```
 
 Enables `$operation`, optionally scoped by `$policy`. `$policy` has the
-signature `function (array $context): array` and returns conditions always
-enforced for that operation. Passing no `$policy` enables the operation with
-no scoping at all. Returns `$this` for chaining.
+signature `function (array $context): ?RawCondition` and returns a raw SQL
+boolean expression (plus its bound params) always enforced for that
+operation — `null` means no scoping. Passing no `$policy` also enables the
+operation with no scoping at all. See [Resources &
+security](03-resources-and-security.md). Returns `$this` for chaining.
 
 ### `policyFor()`
 
@@ -106,6 +108,24 @@ public function policyFor(Operation $operation): \Closure
 Returns the closure registered via `allow()` for `$operation`. Throws
 `Exceptions\ForbiddenException` if that operation was never enabled. Mostly
 used internally by `Api`; rarely called directly.
+
+## `RawCondition`
+
+```php
+final class RawCondition
+{
+    public function __construct(
+        public readonly string $sql,
+        public readonly array $params = [],
+    ) {}
+}
+```
+
+A raw SQL boolean expression plus its bound parameters — what a `Resource`
+policy returns from `allow()`. `$sql` is merged into the query verbatim,
+unvalidated (it's application code, not client input); `$params` are always
+bound, never interpolated. See [Resources &
+security](03-resources-and-security.md).
 
 ### `hasMany()`
 
@@ -322,22 +342,26 @@ ready for `PDO::prepare()`/`PDOStatement::execute()`. Used internally by
 call directly.
 
 ```php
-public static function select(string $table, array $columns, array $filters, array $conditions, ?array $order, ?int $limit, int $offset): array
+public static function select(string $table, array $columns, array $filters, ?RawCondition $condition, ?array $order, ?int $limit, int $offset): array
+public static function count(string $table, array $filters, ?RawCondition $condition): array
 public static function insert(string $table, array $data): array
-public static function update(string $table, array $data, array $conditions): array
-public static function delete(string $table, array $conditions): array
+public static function update(string $table, array $data, ?RawCondition $condition, array $filters = []): array
+public static function delete(string $table, ?RawCondition $condition, array $filters = []): array
 ```
 
 `select()`'s `$limit` of `null` omits the `LIMIT`/`OFFSET` clause entirely —
 used internally when loading a relation, where every matching related row is
-wanted.
+wanted. `insert()` takes no condition at all — a policy's WITH CHECK on an
+insert is enforced by `Api::performInsert()` re-querying the new row, not by
+`QueryBuilder` (see [Resources & security](03-resources-and-security.md)).
 
-Every value ends up bound as a parameter; the only strings interpolated into
-the SQL are identifiers (table name, columns, condition/filter keys, order
-column) — every one of them is re-validated with
-`Resource::assertIdentifier()` before use, regardless of whether the caller
-already checked it. Throws `\InvalidArgumentException` if any isn't a valid
-identifier. See
+A non-null `$condition`'s `sql` is merged into the query's `WHERE` verbatim,
+parenthesized and AND'd with `$filters`; its `params` are bound alongside the
+filter values. Every other string interpolated into the SQL is an identifier
+(table name, columns, filter keys, order column) — every one of them is
+re-validated with `Resource::assertIdentifier()` before use, regardless of
+whether the caller already checked it. Throws `\InvalidArgumentException` if
+any isn't a valid identifier. See
 [Resources & security model](03-resources-and-security.md#identifiers-are-always-validated-values-are-always-bound).
 
 ---

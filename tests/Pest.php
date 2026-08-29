@@ -2,6 +2,7 @@
 
 use AdaiasMagdiel\PdoRestify\Api;
 use AdaiasMagdiel\PdoRestify\Operation;
+use AdaiasMagdiel\PdoRestify\RawCondition;
 use AdaiasMagdiel\PdoRestify\Resource;
 
 uses(Tests\TestCase::class)->in('Unit', 'Feature', 'Integration');
@@ -39,7 +40,7 @@ function ownedPostsApi(PDO $pdo): Api
     $resource = (new Resource('posts'))
         ->columns(['id', 'title', 'body', 'user_id']);
 
-    $scopedToUser = fn (array $context): array => ['user_id' => $context['user_id']];
+    $scopedToUser = fn (array $context): RawCondition => new RawCondition('user_id = :uid', [':uid' => $context['user_id']]);
 
     $resource
         ->allow(Operation::Select, $scopedToUser)

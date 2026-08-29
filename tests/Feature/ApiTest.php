@@ -41,14 +41,26 @@ it('returns 404 when the id belongs to another user', function () {
     expect($response->status)->toBe(404);
 });
 
-it('inserts a row and forces the policy conditions over client input', function () {
+it('inserts a row whose values satisfy the policy WITH CHECK', function () {
     $response = $this->api->handle(
-        new Request('POST', '/posts', body: ['title' => 'New', 'body' => 'New body', 'user_id' => 999]),
+        new Request('POST', '/posts', body: ['title' => 'New', 'body' => 'New body', 'user_id' => 1]),
         ['user_id' => 1],
     );
 
     expect($response->status)->toBe(200);
     expect($response->body['user_id'])->toBe(1);
+});
+
+it('rejects and rolls back an insert whose values violate the policy WITH CHECK', function () {
+    $response = $this->api->handle(
+        new Request('POST', '/posts', body: ['title' => 'New', 'body' => 'New body', 'user_id' => 999]),
+        ['user_id' => 1],
+    );
+
+    expect($response->status)->toBe(403);
+
+    $count = $this->pdo->query("SELECT COUNT(*) FROM posts WHERE title = 'New'")->fetchColumn();
+    expect((int) $count)->toBe(0);
 });
 
 it('updates a row scoped to the policy', function () {

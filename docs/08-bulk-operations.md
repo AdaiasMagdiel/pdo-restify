@@ -10,16 +10,16 @@ or query param to opt in; the shape of the body is the signal.
 ```
 POST /posts
 [
-  { "title": "First", "body": "...", "user_id": 999 },
-  { "title": "Second", "body": "...", "user_id": 999 }
+  { "title": "First", "body": "...", "user_id": 42 },
+  { "title": "Second", "body": "...", "user_id": 42 }
 ]
 ```
 
 Each row goes through the exact same validation and policy as a single
-`POST` — column whitelist, and the `insert` policy's conditions merged over
-(and overriding) whatever the row sent. In this example, both rows still end
-up with whatever `user_id` the policy forces, regardless of the `999` sent
-by the client.
+`POST` — column whitelist, then the `insert` policy's WITH CHECK re-evaluated
+against the written row. If *any* row in the batch violates it (e.g. one row
+sends a `user_id` that isn't the caller's), the whole batch rolls back with a
+`403` — none of the rows are persisted, not just the offending one.
 
 The response is a JSON array of the created rows, in the same order they
 were sent:

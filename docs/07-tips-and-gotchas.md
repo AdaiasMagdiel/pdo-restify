@@ -39,11 +39,10 @@ call `allow(Operation::Select, ...)`, both `GET /{table}` and
 ## Insert returns the row insert actually wrote, not what the client sent
 
 `POST` responds with the row as read back from the database (via an internal
-`find()`), not an echo of the request body. If a policy forces
-`user_id => 42` regardless of what the client sent, the response reflects
-`user_id: 42` — this is usually what you want (it shows the client the real
-effect of their request), but it does mean an insert costs two queries
-internally.
+`find()`), not an echo of the request body — so column defaults, generated
+values, and the like show up correctly. It does mean an insert costs two
+queries internally (three if the `insert` policy has a WITH CHECK: one more
+to re-validate the written row).
 
 ## SQLite specifics
 

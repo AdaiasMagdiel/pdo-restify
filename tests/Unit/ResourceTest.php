@@ -2,6 +2,7 @@
 
 use AdaiasMagdiel\PdoRestify\Exceptions\ForbiddenException;
 use AdaiasMagdiel\PdoRestify\Operation;
+use AdaiasMagdiel\PdoRestify\RawCondition;
 use AdaiasMagdiel\PdoRestify\Relation;
 use AdaiasMagdiel\PdoRestify\RelationType;
 use AdaiasMagdiel\PdoRestify\Resource;
@@ -23,7 +24,7 @@ it('denies an operation with no policy by default', function () {
 })->throws(ForbiddenException::class);
 
 it('returns the registered policy for an operation', function () {
-    $policy = fn (array $context) => ['user_id' => $context['user_id']];
+    $policy = fn (array $context) => new RawCondition('user_id = :uid', [':uid' => $context['user_id']]);
 
     $resource = (new Resource('posts'))->allow(Operation::Select, $policy);
 
@@ -33,7 +34,7 @@ it('returns the registered policy for an operation', function () {
 it('allows an operation with no scoping when no policy is given', function () {
     $resource = (new Resource('posts'))->allow(Operation::Select);
 
-    expect(($resource->policyFor(Operation::Select))([]))->toBe([]);
+    expect(($resource->policyFor(Operation::Select))([]))->toBeNull();
 });
 
 it('declares a hasMany relation, defaulting the table to the relation name', function () {

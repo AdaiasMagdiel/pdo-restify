@@ -11,11 +11,11 @@ beforeEach(function () {
     $this->api = ownedPostsApi($this->pdo);
 });
 
-it('bulk inserts every row, forcing the policy conditions on each one', function () {
+it('bulk inserts every row whose values satisfy the policy WITH CHECK', function () {
     $response = $this->api->handle(
         new Request('POST', '/posts', body: [
-            ['title' => 'A', 'body' => 'Body A', 'user_id' => 999],
-            ['title' => 'B', 'body' => 'Body B', 'user_id' => 999],
+            ['title' => 'A', 'body' => 'Body A', 'user_id' => 1],
+            ['title' => 'B', 'body' => 'Body B', 'user_id' => 1],
         ]),
         ['user_id' => 1],
     );
@@ -44,6 +44,21 @@ it('rolls back the entire bulk insert if any row is invalid', function () {
     );
 
     expect($response->status)->toBe(422);
+
+    $count = $this->pdo->query('SELECT COUNT(*) FROM posts')->fetchColumn();
+    expect((int) $count)->toBe(3);
+});
+
+it('rolls back the entire bulk insert if any row violates the policy WITH CHECK', function () {
+    $response = $this->api->handle(
+        new Request('POST', '/posts', body: [
+            ['title' => 'A', 'body' => 'Body A', 'user_id' => 1],
+            ['title' => 'B', 'body' => 'Body B', 'user_id' => 999],
+        ]),
+        ['user_id' => 1],
+    );
+
+    expect($response->status)->toBe(403);
 
     $count = $this->pdo->query('SELECT COUNT(*) FROM posts')->fetchColumn();
     expect((int) $count)->toBe(3);
@@ -89,6 +104,21 @@ it('rolls back the entire bulk update if any row is outside the policy', functio
     );
 
     expect($response->status)->toBe(404);
+
+    $title = $this->pdo->query('SELECT title FROM posts WHERE id = 1')->fetchColumn();
+    expect($title)->toBe('First');
+});
+
+it('rolls back a bulk update if any row would violate the policy WITH CHECK', function () {
+    $response = $this->api->handle(
+        new Request('PATCH', '/posts', body: [
+            ['id' => 1, 'title' => 'Fine'],
+            ['id' => 2, 'title' => 'Reassigned', 'user_id' => 999],
+        ]),
+        ['user_id' => 1],
+    );
+
+    expect($response->status)->toBe(403);
 
     $title = $this->pdo->query('SELECT title FROM posts WHERE id = 1')->fetchColumn();
     expect($title)->toBe('First');
